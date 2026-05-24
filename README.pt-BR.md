@@ -53,4 +53,4 @@ Após a instalação, a pasta do instalador é automaticamente removida do diret
 
 ## Licença
 
-[MIT](LICENSE) — uso livre, sem garantia. Use por sua conta e risco.
+[Uso Livre](LICENSE) — sem restrições, use por sua conta e risco.

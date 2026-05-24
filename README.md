@@ -53,4 +53,4 @@ After installation, the installer folder is automatically cleaned up from the pa
 
 ## License
 
-[MIT](LICENSE) — free to use, no warranty. Use at your own discretion.
+[Free to Use](LICENSE) — no restrictions, use at your own discretion.
