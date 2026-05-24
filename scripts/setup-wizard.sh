@@ -1,0 +1,441 @@
+#!/usr/bin/env bash
+# LLM Wiki Setup Wizard — Initialize a clean knowledge base in an Obsidian vault.
+# Self-contained: copies system files from sibling directories within this LLM-wiki-system-install/ folder.
+# Usage (interactive): bash LLM-wiki-system-install/scripts/setup-wizard.sh
+# Usage (agent/non-interactive): see environment variables below.
+#
+# Portable — send the entire LLM-wiki-system-install/ folder to another user. They extract it and run:
+#   bash LLM-wiki-system-install/scripts/setup-wizard.sh
+
+set -e
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+YELLOW='\033[1;33m'
+BLUE='\033[0;34m'
+NC='\033[0m'
+
+info()  { echo -e "${BLUE}[INFO]${NC} $*"; }
+success() { echo -e "${GREEN}[OK]${NC} $*"; }
+warn()  { echo -e "${YELLOW}[WARN]${NC} $*"; }
+error() { echo -e "${RED}[ERROR]${NC} $*"; }
+
+# ─── Self-Contained: Find bundled setup files relative to this script ──
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+SETUP_SRC="$SCRIPT_DIR/.."
+
+if [ ! -d "$SETUP_SRC" ]; then
+    error "Setup folder not found at $SETUP_SRC"
+    info "Extract the LLM-wiki-system-install/ folder and run from there."
+    exit 1
+fi
+
+# ─── Quick Guide: What is LLM Wiki? ──────────────────────────────────
+print_guide() {
+    echo ""
+    info "═══════════════════════════════════════════════════"
+    echo ""
+    info "  LLM Wiki — Knowledge Base for Agentic AI"
+    echo ""
+    cat << 'GUIDE'
+
+  LLM Wiki turns raw source material into organized, queryable
+  knowledge that AI agents and humans can use.
+
+  What it does:
+    • Ingests articles, notes, transcripts → Raw/Sources/
+    • Compiles them into structured Wiki notes (Concepts, Topics, Entities)
+    • Maintains a searchable catalog for fast retrieval
+    • Validates quality on every commit (lint, build, source checks)
+
+  How to use:
+    1. Add raw sources as cleaned Markdown in Raw/Sources/
+    2. Run the ingest skill (.agents/skills/llm-wiki-ingest/) or
+       follow AGENTS.md for the full workflow
+    3. Query the catalog to find existing knowledge before work
+       (use .agents/skills/llm-wiki-query/) before creating new notes
+    4. Create or update Wiki notes in the correct subfolder:
+       Concepts → Wiki/Concepts/, Topics → Wiki/Topics/
+
+  Architecture:
+    Raw/       → Source material (never modified)
+    Wiki/      → Compiled knowledge (queryable, linked)
+                 Concepts/, Topics/, Entities/, Projects/, Logs/
+    Schema/    → Rules and validation definitions
+    scripts/   → Validation tools (wiki_tool.py)
+                 build, lint, search-catalog, source-lint
+    .agents/   → Agent skills (ingest, query, lint, maintain)
+
+GUIDE
+    echo "  ═══════════════════════════════════════════════════"
+    echo ""
+
+    info "  Agent usage (non-interactive):"
+    cat << 'AGENTS'
+
+    IMPORTANT: Agents must use environment variables — do NOT interact with prompts.
+
+    Required env vars for new vault:
+      SETUP_MODE=1              # 1 = create new, 2 = apply to existing
+      SETUP_VAULT_NAME="MyWiki" # name of the new vault (required for mode 1)
+      SETUP_CONFIRM=y           # skip confirmation prompt
+
+    Optional env vars:
+      SETUP_VAULT_PATH="/path"  # override default vault location
+                                # Default: .llm-wiki/ sibling to LLM-wiki-system-install/
+
+    Example — create new vault:
+      export SETUP_MODE=1
+      export SETUP_VAULT_NAME="MyWiki"
+      bash LLM-wiki-system-install/scripts/setup-wizard.sh
+
+    Example — apply to existing vault:
+      export SETUP_MODE=2
+      bash LLM-wiki-system-install/scripts/setup-wizard.sh   # prompts for vault selection
+
+AGENTS
+}
+
+# ─── Prerequisite Checks ──────────────────────────────────────────────
+info "Checking prerequisites..."
+
+# 1. Check if Obsidian CLI is available
+if command -v obsidian &> /dev/null; then
+    success "Obsidian CLI found: $(which obsidian)"
+else
+    warn "Obsidian CLI not found in PATH."
+    info "You can still create a vault structure manually, but features like"
+    info "dead link detection and task management will require manual setup."
+fi
+
+# 2. Check if Obsidian app is running (for CLI-dependent features)
+if command -v obsidian &> /dev/null; then
+    if obsidian version &> /dev/null 2>&1; then
+        OSSION_VERSION=$(obsidian version 2>/dev/null | head -1)
+        success "Obsidian is running: $OSSION_VERSION"
+    else
+        warn "Obsidian CLI found but app is not running."
+        info "Features like dead link detection and task management are unavailable"
+        info "until Obsidian is launched. Vault creation will still work."
+    fi
+fi
+
+# 3. Check if Python is available (for wiki_tool validation)
+if command -v python3 &> /dev/null; then
+    PYTHON_VER=$(python3 --version 2>&1 | sed -n 's/Python \([0-9]*\.[0-9]*\).*/1/p')
+    success "Python $PYTHON_VER found"
+else
+    warn "python3 not found. Validation commands won't be available."
+fi
+
+# ─── Discover Existing Vaults ──────────────────────────────────────────
+echo ""
+info "Discovering existing Obsidian vaults..."
+
+EXISTS_VAULTS=""
+if command -v obsidian &> /dev/null; then
+    EXISTS_VAULTS=$(obsidian vaults 2>/dev/null || true)
+fi
+
+if [ -n "$EXISTS_VAULTS" ]; then
+    success "Found existing vaults:"
+    VAULT_NUM=0
+    while IFS= read -r line; do
+        [ -z "$line" ] && continue
+        VAULT_NUM=$((VAULT_NUM + 1))
+        echo "   $VAULT_NUM. ${line}"
+    done <<< "$EXISTS_VAULTS"
+else
+    warn "No existing vaults detected (Obsidian may not be running)."
+fi
+
+# ─── Mode Selection ────────────────────────────────────────────────────
+MODE="${SETUP_MODE:-}"
+
+# Always show guide — useful for both humans and agents
+print_guide
+
+# Guard: if no env vars set AND not a TTY, fail with clear error (no hanging)
+if [ -z "$MODE" ] && [ ! -t 0 ]; then
+    error "No SETUP_MODE set and not running in a terminal."
+    info "Agents: use env vars (SETUP_MODE, SETUP_VAULT_NAME) and run non-interactively."
+    info "Example: export SETUP_MODE=1 && bash LLM-wiki-system-install/scripts/setup-wizard.sh"
+    exit 1
+fi
+
+# Support non-interactive mode via environment variables:
+#   SETUP_MODE=1|2, SETUP_VAULT_NAME="...", SETUP_VAULT_PATH="/path"
+
+VAULT_NAME="${SETUP_VAULT_NAME:-}"
+VAULT_PATH="${SETUP_VAULT_PATH:-}"
+CONFIRM="${SETUP_CONFIRM:-y}"
+
+if [ -z "$MODE" ]; then
+    echo ""
+    info "How would you like to proceed?"
+    if [ -n "$EXISTS_VAULTS" ]; then
+        echo "   1. Create a NEW vault from scratch"
+        echo "   2. Apply to an EXISTING vault (select one above)"
+    else
+        echo "   1. Create a NEW vault from scratch"
+    fi
+
+    echo -n $'\nChoose (1 or 2): ' >&2
+    read MODE || true
+fi
+
+if [[ "$MODE" != "1" && -z "$EXISTS_VAULTS" ]]; then
+    error "No existing vaults available. Creating a new one."
+fi
+
+# ─── NEW VAULT MODE ────────────────────────────────────────────────────
+if [[ "$MODE" == "1" ]]; then
+    if [ -z "$VAULT_NAME" ]; then
+        echo -n $'\nEnter vault name (e.g., My Wiki): ' >&2
+        read VAULT_NAME || true
+    fi
+
+    if [ -z "$VAULT_NAME" ]; then
+        error "Vault name cannot be empty."
+        exit 1
+    fi
+
+    # Resolve vault path — the .llm-wiki folder IS the vault root
+    VAULT_PATH="${VAULT_PATH:-}"
+    if [ -z "$VAULT_PATH" ]; then
+        SETUP_PARENT="$(cd "$SETUP_SRC" && pwd)"
+        # Check if LLM-wiki-system-install/ lives inside a .llm-wiki/ folder → use it as vault root
+        if [ -d "$SETUP_PARENT/.llm-wiki" ]; then
+            VAULT_PATH="$SETUP_PARENT/.llm-wiki"
+        else
+            # Otherwise create .llm-wiki/ sibling to LLM-wiki-system-install/
+            VAULT_PATH="$SETUP_PARENT/../.llm-wiki/$VAULT_NAME"
+        fi
+    fi
+
+    # Resolve path for display (remove .. segments, normalize)
+    VAULT_PATH="$(python3 -c "import os.path; print(os.path.normpath('$VAULT_PATH'))" 2>/dev/null || echo "$VAULT_PATH")"
+
+    # Create the directory if it doesn't exist
+    mkdir -p "$VAULT_PATH"
+
+    # Initialize git repo if not already initialized
+    if [ ! -d "$VAULT_PATH/.git" ]; then
+        info "Initializing git repository..."
+        cd "$VAULT_PATH" && git init -q 2>/dev/null || true
+    fi
+
+    success "Vault directory: $VAULT_PATH"
+
+
+# ─── EXISTING VAULT MODE ──────────────────────────────────────────────
+elif [[ "$MODE" == "2" ]]; then
+    if [ -z "$EXISTS_VAULTS" ]; then
+        error "No existing vaults found. Use mode 1 to create a new one."
+        exit 1
+    fi
+
+    VAULT_NUM=0
+    echo -n $'\nSelect vault number: ' >&2
+    read VAULT_NUM || true
+
+    if ! [[ "$VAULT_NUM" =~ ^[0-9]+$ ]] || [ "$VAULT_NUM" -lt 1 ] || [ "$VAULT_NUM" -gt "$(echo "$EXISTS_VAULTS" | grep -c .)" ]; then
+        error "Invalid selection."
+        exit 1
+    fi
+
+    VAULT_NAME=$(echo "$EXISTS_VAULTS" | sed -n "${VAULT_NUM}p")
+    # For existing vaults, we need the actual path — use obsidian CLI to find it
+    VAULT_PATH=$(obsidian vaults 2>/dev/null | sed -n "${VAULT_NUM}p" || true)
+
+    # Fallback: check common locations
+    if [ -z "$VAULT_PATH" ]; then
+        for base in "$HOME/Obsidian Vault" "$HOME/Documents/Obsidian"; do
+            if [ -d "$base/$VAULT_NAME" ]; then
+                VAULT_PATH="$base/$VAULT_NAME"
+                break
+            fi
+        done
+    fi
+
+    if [ -z "$VAULT_PATH" ] || [ ! -d "$VAULT_PATH" ]; then
+        error "Could not resolve path for vault '$VAULT_NAME'. Try mode 1 instead."
+        exit 1
+    fi
+
+    success "Selected vault: ${VAULT_NAME}"
+else
+    error "Invalid choice."
+    exit 1
+fi
+
+# ─── Confirm Before Writing ────────────────────────────────────────────
+echo ""
+info "This will create the LLM Wiki system in: ${VAULT_PATH}"
+echo ""
+info "What will be created:"
+echo "   Directory structure: Raw/, Wiki/ (Topics, Concepts, Entities, Projects, Logs), Schema/, _templates/, scripts/, .agents/skills/"
+echo "   Files: AGENTS.md, welcome note, 6 templates, schema files, wiki_tool.py, audit_public.py"
+echo "   Pre-commit hook enforcing validation on every commit"
+
+if [ -z "$CONFIRM" ]; then
+    echo -n $'\nProceed? (y/n): ' >&2
+    read CONFIRM || true
+fi
+
+if [[ "$CONFIRM" != "y" && "$CONFIRM" != "Y" ]]; then
+    warn "Setup cancelled."
+    exit 0
+fi
+
+# ─── Setup Function (Self-Contained: copies from bundled LLM-wiki-system-install/ folder) ──
+setup_vault() {
+    local TARGET_DIR="$1"
+
+    cd "$TARGET_DIR" || exit 1
+
+    # ── Create directory structure
+    info "Creating directory structure..."
+    mkdir -p Raw/Sources Raw/Files Wiki/{Topics,Concepts,Entities,Projects,Logs} Schema _templates scripts .agents/skills/llm-wiki-ingest .agents/skills/llm-wiki-query .agents/skills/llm-wiki-lint .agents/skills/llm-wiki-maintain
+
+    # ── Create placeholder files
+    touch Raw/Sources/.gitkeep Wiki/Topics/.gitkeep Wiki/Concepts/.gitkeep Wiki/Entities/.gitkeep Wiki/Projects/.gitkeep Wiki/Logs/.gitkeep
+
+    # ── Copy system files from bundled setup folder
+    info "Copying system files..."
+
+    # Core config (from root of LLM-wiki-system-install/)
+    cp "$SETUP_SRC/.gitignore" . 2>/dev/null || true
+    cp "$SETUP_SRC/AGENTS.md" . 2>/dev/null || true
+    cp "$SETUP_SRC/Welcome.md" . 2>/dev/null || true
+
+    # Templates
+    for t in "$SETUP_SRC"/templates/*.md; do
+        [ -f "$t" ] && cp "$t" _templates/ 2>/dev/null || true
+    done
+
+    # Schema files
+    for s in "$SETUP_SRC"/schema/*.md; do
+        [ -f "$s" ] && cp "$s" Schema/ 2>/dev/null || true
+    done
+
+    # Scripts (wiki_tool.py, audit_public.py) — skip setup-wizard.sh
+    for s in "$SETUP_SRC"/scripts/*; do
+        [ -f "$s" ] && [[ "$(basename "$s")" != "setup-wizard.sh" ]] && cp "$s" scripts/ 2>/dev/null || true
+    done
+
+    # Agent skills (one file per skill subdirectory)
+    for d in "$SETUP_SRC"/.agents/skills/*/; do
+        [ -d "$d" ] && cp "$d"SKILL.md ".agents/skills/$(basename "$d")/" 2>/dev/null || true
+    done
+
+    # Pre-commit hook
+    mkdir -p .git/hooks 2>/dev/null || true
+    if [ -f "$SETUP_SRC"/hooks/pre-commit ]; then
+        cp "$SETUP_SRC"/hooks/pre-commit .git/hooks/pre-commit 2>/dev/null || true
+        chmod +x .git/hooks/pre-commit 2>/dev/null || true
+    fi
+
+    success "Setup complete: $TARGET_DIR"
+}
+
+# ─── Run Setup ────────────────────────────────────────────────────────
+setup_vault "$VAULT_PATH"
+
+# ─── Clean up LLM-wiki-system-install/ if it's inside the vault parent folder ─────
+clean_up_installer() {
+    local SETUP_PARENT="$(cd "$SETUP_SRC" && pwd)"
+    local PARENT_DIR=$(dirname "$SETUP_PARENT")
+    for dir in LLM-wiki-system-install installer setup; do
+        if [ -d "$PARENT_DIR/$dir" ]; then
+            rm -rf "$PARENT_DIR/$dir"
+            success "Cleaned up: $dir/ (installation complete)"
+        fi
+    done
+}
+clean_up_installer
+
+# ─── Register Vault Path (so skills auto-discover it) ─────────────
+mkdir -p "$HOME/.pi"
+echo "$VAULT_PATH" > "$HOME/.pi/pi-vault-path"
+success "Vault path registered: ~/.pi/pi-vault-path"
+
+# ─── Register with Obsidian (if CLI available and running) ─────────
+register_obsidian_vault() {
+    local VPATH="$1"
+
+    # Create .obsidian folder with basic config if missing (always)
+    mkdir -p "$VPATH/.obsidian"
+    if [ ! -f "$VPATH/.obsidian/app.json" ]; then
+        printf '{\n  "alwaysUpdateLinks": true,\n  "useMarkdownLinks": false\n}\n' > "$VPATH/.obsidian/app.json"
+    fi
+
+    # Find Obsidian config — platform-agnostic (always try to register)
+    local OCFG=""
+    case "$(uname -s)" in
+        Darwin*)  OCFG="$HOME/Library/Application Support/obsidian/obsidian.json" ;;
+        MINGW*|MSYS*) OCFG="$APPDATA/Obsidian/obsidian.json" ;;
+        *)        OCFG="$HOME/.config/Obsidian/obsidian.json" ;;
+    esac
+
+    if [ -f "$OCFG" ]; then
+        local VID=$(python3 -c "import uuid; print(str(uuid.uuid4())[:12])")
+        python3 << PYEOF
+import json, os
+config_path = "$OCFG"
+vault_path = "$VPATH"
+with open(config_path, 'r') as f:
+    config = json.load(f)
+config['vaults']['$VID'] = {'path': vault_path, 'ts': int(os.path.getmtime(vault_path) * 1000)}
+with open(config_path, 'w') as f:
+    json.dump(config, f, indent=2)
+print(f'Registered vault as ID: $VID')
+PYEOF
+        success "Vault registered with Obsidian (restart to see it)."
+    else
+        warn "Could not find Obsidian config at $OCFG. Open the vault in Obsidian to register it manually."
+    fi
+}
+register_obsidian_vault "$VAULT_PATH"
+
+# ─── Register Agent Skills Locally (in vault) ──────────────────────
+register_skills() {
+    local VAULT_SKILLS="$VAULT_PATH/.agents/skills/"
+    if [ -d "$VAULT_SKILLS" ]; then
+        for skill_dir in "$VAULT_SKILLS"*/; do
+            [ -d "$skill_dir" ] || continue
+            local skill_name=$(basename "$skill_dir")
+            success "Skill available in vault: $skill_name"
+        done
+    fi
+}
+register_skills
+
+echo ""
+info "Running post-setup validation..."
+
+cd "$VAULT_PATH" || exit 1
+
+if command -v python3 &> /dev/null; then
+    if [ -f "scripts/wiki_tool.py" ]; then
+        python3 scripts/wiki_tool.py build 2>&1 && success "Build OK" || warn "Build had issues (expected — no Wiki notes yet)"
+        python3 scripts/wiki_tool.py lint 2>&1 && success "Lint OK" || warn "Lint had issues (expected — no Wiki notes yet)"
+    else
+        warn "wiki_tool.py not found. Validation unavailable."
+    fi
+fi
+
+if command -v obsidian &> /dev/null; then
+    if obsidian version &> /dev/null 2>&1; then
+        info "Restart Obsidian to see the new vault in its list."
+    else
+        warn "Obsidian not running. Please open the vault in Obsidian to register it."
+    fi
+fi
+
+echo ""
+success "Setup complete! ${VAULT_PATH}"
+info "Next steps:"
+echo "   1. Open the vault in Obsidian (restart to see new vault)"
+echo "   2. Add your first source to Raw/Sources/"
+echo "   3. Follow the ingest workflow in AGENTS.md"
+info "Agent skills are available in .agents/skills/ — use them to ingest, query, and lint."

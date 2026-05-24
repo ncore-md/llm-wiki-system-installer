@@ -1,0 +1,20 @@
+#!/bin/bash
+# LLM Wiki pre-commit hook — runs validation before every commit.
+
+set -e
+
+REPO_ROOT="$(git rev-parse --show-toplevel)"
+cd "$REPO_ROOT"
+
+echo "Running LLM Wiki pre-commit checks..."
+
+# Build catalog and indexes
+python3 scripts/wiki_tool.py build || { echo "FAIL: build"; exit 1; }
+
+# Lint compiled notes
+python3 scripts/wiki_tool.py lint || { echo "FAIL: lint"; exit 1; }
+
+# Lint sources
+python3 scripts/wiki_tool.py source-lint || { echo "FAIL: source-lint"; exit 1; }
+
+echo "OK: All pre-commit checks passed."

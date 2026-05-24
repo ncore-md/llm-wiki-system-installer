@@ -1,0 +1,152 @@
+# Agent Rules — LLM Wiki
+> **Optimized for Pi.** This vault is built to be agent-agnostic, but all workflows and tooling are optimized for Pi. See [[Pi (Coding Agent)]] for details.
+
+## Related System Files
+
+### Schema (rules & references)
+- [[Schema/frontmatter-schema.md]] — Frontmatter rules and validation definitions
+- [[Schema/naming-conventions.md]] — Naming conventions for notes, tags, and paths
+- [[Schema/lint-checklist.md]] — Pre-commit lint checklist
+- [[Schema/workflow-examples.md]] — Workflow examples for ingest, query, maintain
+- [[Schema/command-reference.md]] — CLI command reference (wiki_tool.py)
+
+### Templates (_templates/)
+- [_templates/concept-note.md] — Template for concept notes
+- [_templates/entity-note.md] — Template for entity notes
+- [_templates/topic-note.md] — Template for topic notes
+- [_templates/project-note.md] — Template for project notes
+- [_templates/log-note.md] — Template for log entries
+- [_templates/source-note.md] — Template for raw source notes
+- [_templates/session-log.md] — Template for session logs
+
+### Tooling & Skills
+- [[scripts/wiki_tool.py]] — Validation tools: build, lint, search-catalog
+- `.agents/skills/` — Agent skills (ingest, query, lint, maintain)
+- [[Welcome.md]] — Getting started guide
+
+## Directory Structure
+
+| Path | Role |
+|------|------|
+| `Raw/Sources/` | **Source material only.** Original notes, articles, transcripts. Never compile knowledge here — this is the source of truth for unprocessed content. |
+| `Raw/Files/` | Binary attachments (images, PDFs) referenced by sources. |
+| `Wiki/Topics/` | Compiled topic notes — broad subject areas covered by the Wiki. |
+| `Wiki/Concepts/` | Compiled concept notes — discrete ideas, definitions, mechanisms. |
+| `Wiki/Entities/` | Compiled entity notes — people, organizations, tools, places. |
+| `Wiki/Projects/` | Compiled project notes — initiatives with scope and status. |
+| `Wiki/Logs/` | Activity logs, change records — one note per meaningful action. |
+| `Schema/` | Rules, schemas, catalog manifest files. Not user-facing notes. |
+| `_templates/` | Note templates for new content creation — do not edit without reason. |
+| `scripts/` | Tooling scripts (wiki_tool.py, audit_public.py). Do not edit without reason. |
+| `.agents/skills/` | Agent skill definitions (ingest, query, lint, maintain). |
+| `tutorial/` | Tutorial files and documentation. Empty until populated. |
+
+## Core Rules (Non-Negotiable)
+
+1. **Keep Raw source notes source-faithful.** Do not overwrite Raw content during compilation (keep the original).
+2. **Keep compiled Wiki notes short and single-purpose.** One concept per note, 3–5 key points max.
+3. **Use plain tags only** (no formatting). Always use #tags in frontmatter, never inline.
+4. **Always keep topics and sources on every compiled Wiki note.** Even if empty (topics: [], sources: []).
+5. **Always query from `Wiki/index.md` and `Wiki/catalog.jsonl`** before opening broad context.
+6. **Treat source_count as derived, not manually set.** Always run build after updates.
+7. **Never overwrite Raw sources** when creating or updating Wiki notes.
+
+## Allowed Tags for Compiled Wiki Notes
+
+- `topic` — broad subject areas
+- `concept` — discrete ideas, definitions, mechanisms
+- `entity` — people, organizations, tools, places
+- `project` — initiatives with scope and status
+- `log` — activity logs, change records
+
+## Ingest Workflow
+
+When the user adds a new source:
+
+1. **Put cleaned Markdown in `Raw/Sources/`.** Clean up the content — remove navigation, ads, and clutter. Preserve all factual claims and context from the original source.
+
+2. **Search the catalog for related topics.**
+   ```bash
+   python3 scripts/wiki_tool.py search-catalog --query "key topic"
+   ```
+
+3. **Open only the most relevant compiled Wiki notes** from Step 2 results — not all Raw context. Understand what already exists before creating new notes.
+
+4. **Create or update focused notes in `Wiki/`** (correct folder per tag):
+   - Topic notes → `Wiki/Topics/` — broad subject areas
+   - Concept notes → `Wiki/Concepts/` — discrete ideas, definitions, mechanisms
+   - Entity notes → `Wiki/Entities/` — people, organizations, tools, places
+   - Project notes → `Wiki/Projects/` — initiatives with scope and status
+
+5. **Add Raw source links to `sources`.** Keep `source_count` accurate (must equal number of entries in `sources`).
+
+6. **Run validation:**
+   ```bash
+   python3 scripts/wiki_tool.py build && python3 scripts/wiki_tool.py lint
+   ```
+
+7. **Update manifest:** `python3 scripts/wiki_tool.py source-scan --update --accept-covered`
+
+8. **Add a log entry** if the ingest meaningfully changed the Wiki:
+   ```bash
+   python3 scripts/wiki_tool.py log --title "..." --details "..."
+   ```
+
+9. **Commit.**
+
+## Query Workflow
+
+When answering a question from the Wiki:
+
+1. Start with `Wiki/index.md` for an overview.
+2. Search the catalog:
+
+```bash
+python3 scripts/wiki_tool.py search-catalog --query "user topic"
+```
+
+3. Open the most relevant Wiki notes from Step 2 results.
+4. Synthesize an answer from the compiled notes (distilled knowledge).
+5. Open Raw sources **only** when:
+   - The compiled note is insufficient, OR
+   - Source-level verification is requested.
+6. Cite both the compiled note and Raw source when your answer depends on source material.
+
+## Maintenance Gate
+
+Before every meaningful commit, run:
+
+```bash
+python3 scripts/wiki_tool.py doctor && python3 scripts/wiki_tool.py build && python3 scripts/wiki_tool.py lint && python3 scripts/wiki_tool.py source-lint
+```
+
+After source ingestion, also run:
+
+```bash
+python3 scripts/wiki_tool.py source-scan --update --accept-covered && python3 scripts/wiki_tool.py source-lint
+```
+
+## Scripts Reference
+
+| Command | Purpose |
+|---------|---------|
+| `python3 scripts/wiki_tool.py doctor` | Non-mutating health check (folders, Python version, catalog, manifest) |
+| `python3 scripts/wiki_tool.py build` | Rebuilds `catalog.jsonl`, `index.md`, and per-folder indexes |
+| `python3 scripts/wiki_tool.py lint` | Validates compiled note frontmatter, tags, source links, `source_count` |
+| `python3 scripts/wiki_tool.py source-scan [--update] [--accept-covered]` | Lists Raw sources; `--update` updates manifest; `--accept-covered` marks covered as processed |
+| `python3 scripts/wiki_tool.py source-lint` | Validates source frontmatter and coverage state |
+| `python3 scripts/wiki_tool.py search-catalog --query "text"` | Searches compiled Wiki notes via `catalog.jsonl` |
+| `python3 scripts/wiki_tool.py log --title "t" --details "d"` | Appends a short entry to `Wiki/Logs/log.md` |
+| `python3 scripts/audit_public.py` | Fails on secrets, local paths, private keys, plugin/cache state |
+
+## Obsidian CLI (Optional — Requires Running Obsidian)
+
+The `obsidian` CLI (`/usr/local/bin/obsidian`) provides features no other tool can do. Only use when Obsidian is running.
+
+| Command | Purpose |
+|---------|--------|
+| `obsidian vault="Pi-Vault" unresolved` | Lists broken/missing wikilinks in the vault |
+| `obsidian vault="Pi-Vault" tasks` | Lists all checkbox tasks across notes |
+| `obsidian vault="Pi-Vault" daily:read` | Reads the current daily note |
+
+> **Rule:** If Obsidian is not running, do NOT use the CLI for note CRUD — fall back to built-in `obsidian_*` functions or bash.
