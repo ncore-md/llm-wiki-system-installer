@@ -1,5 +1,7 @@
 # LLM Wiki Installer
 
+> 🌐 [Português (BR)](README.pt-BR.md)
+
 Portable installer for the [LLM Wiki](https://github.com/ncore-md/Pi-Vault) knowledge base system. Creates a structured Obsidian vault optimized for agentic AI workflows.
 
 ## Quick Start

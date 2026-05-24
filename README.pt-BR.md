@@ -1,5 +1,7 @@
 # Instalador LLM Wiki
 
+> 🌐 [English](README.md)
+
 Instalador portátil para o sistema de base de conhecimento [LLM Wiki](https://github.com/ncore-md/Pi-Vault). Cria um repositório estruturado no Obsidian otimizado para fluxos de trabalho com IA agente.
 
 ## Início Rápido
