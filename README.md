@@ -53,4 +53,4 @@ After installation, the installer folder is automatically cleaned up from the pa
 
 ## License
 
-Same as Pi-Vault.
+[MIT](LICENSE) — free to use, no warranty. Use at your own discretion.
