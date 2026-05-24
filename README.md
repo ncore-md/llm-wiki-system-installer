@@ -1,8 +1,13 @@
 # LLM Wiki Installer
 
-Portable installer for the [LLM Wiki](https://github.com/.../Pi-Vault) knowledge base system. Creates a structured Obsidian vault optimized for agentic AI workflows.
+Portable installer for the [LLM Wiki](https://github.com/ncore-md/Pi-Vault) knowledge base system. Creates a structured Obsidian vault optimized for agentic AI workflows.
 
 ## Quick Start
+
+### One-liner (recommended)
+```bash
+gh repo clone ncore-md/llm-wiki-system-installer && cd llm-wiki-system-installer && open Install.command
+```
 
 ### Human (interactive)
 Double-click `Install.command` in Finder, or run:
