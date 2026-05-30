@@ -168,14 +168,13 @@ Run these from the wiki root directory (the same directory that contains `AGENTS
 | # | Check | Command / Action |
 |---|-------|------------------|
 | C1 | **Read config for ALL paths** before writing anything | `python3 scripts/wiki_shared.py config --force` — store values in variables (`RAW_PATH`, `WIKI_FOLDER`, etc.) |
-| C2 | **Pre-write YAML verification** — confirm frontmatter has real values before calling write tool | Visually inspect: `sources:` must have entries, not empty `[]`; `topics:` must have ≥1 wikilink; `tags:` must be array |
+| C2 | **Pre-write YAML verification** — confirm frontmatter has real values before calling write tool | Visually inspect: `sources:` must have entries (quoted wikilinks), `topics:` must have ≥1 plain text topic title; `tags:` must be array |
 | C3 | **Post-write re-read** — verify file has both frontmatter AND body content after every write |
 | C11 | **Source body integrity** — verify cleaned source preserved full content (not truncated) | Compare line count before/after cleaning. If body dropped >50% of original lines, RE-DO with in-context editing (no script). |
 | C0 + C11 | **Combined read-back** — after cleaning, verify BOTH: (a) no timestamp/promo/image patterns remain (`grep '\*\*[0-9]' file` must return 0), AND (b) line count preserved within tolerance | Read first and last 50 lines of the cleaned file. Confirm content flows naturally with no artifacts.
 | C4 | **Sources hard gate** — block if any note has empty `sources:` array | `grep -r 'sources: \[\]' <WIKI_FOLDER>/ — if any output, FIX immediately before proceeding |
 | C5 | **Array format verification** — block if any multi-value field uses scalar form | `grep -A2 'sources:' <WIKI_FOLDER>/*md — must show block-array format, not scalar |
-| C6 | **Topics required** — concept/entity notes must have ≥1 topic wikilink (from parsed rules) | `grep -A2 'topics:' <WIKI_FOLDER>/*md — must have at least one entry |
-| C7 | **Topics required** — concept/entity notes must have ≥1 topic wikilink (from parsed rules) | `grep -A2 'topics:' <WIKI_FOLDER>/*md — must have at least one entry |
+| C6 | **Topics required** — concept/entity notes must have ≥1 plain text topic title (from parsed rules). NOT wikilinks — Obsidian renders `- [[wikilink]]` in YAML frontmatter as triple brackets. Use raw title text only (e.g., `- Voxel Game Development`). | `grep -A2 'topics:' <WIKI_FOLDER>/*md — must have at least one plain text entry, no [[ ]] brackets |
 | C8 | **Required sections** — every compiled note must have `## Related` AND `## Sources` in body | `grep -c '^## Related\|^## Sources' <WIKI_FOLDER>/<Note Name>.md — must return count of required sections |
 | C9 | **On-disk filename match** — verify frontmatter source paths match actual filenames on disk (especially for apostrophes, curly quotes) | `ls <RAW_PATH>/ | grep <keyword>` — compare against frontmatter |
 | C0 | **Read-back source body** — after cleaning, explicitly read back the cleaned file and verify NO timestamp patterns (`**X:XX** ·`, `HH:MM:SS - Title`), promo lines, or image embeds remain | Read first 50 and last 50 lines of the cleaned source file. If any timestamp/promo pattern found, clean again before proceeding to Step 2 |
@@ -540,7 +539,7 @@ Use `discover_config()` or `get_config()` to get the routing table — it may di
 **Enforcement checklist before writing:**
 1. **Read template** — `cat $TEMPLATES_DIR/<tag>-note.md` (e.g., `_templates/concept-note.md`). Verify the template has frontmatter, `## Related`, and `## Sources` sections. Use this as your base structure.
 2. Analyze for distinct knowledge items — does this source cover multiple concepts, tools, or decisions? Create separate notes if needed.
-3. **Populate `topics:`** — use Step 2 catalog results to pick specific, relevant topic wikilinks. Each topic must be a meaningful subject area covered by the note (not a generic system name). If no relevant topics found, create one first (write to `Wiki/Topics/<Topic Name>.md` using the template), then reference it. Never leave empty.
+3. **Populate `topics:`** — use Step 2 catalog results to pick specific, relevant topic titles. Use the **exact title text** from the target note's frontmatter `title:` field — NOT wikilinks. Obsidian renders `- [[wikilink]]` in YAML frontmatter as triple brackets (broken display). Use raw plain text only, e.g., `- Voxel Game Development`. If no relevant topics found, create one first (write to `Wiki/Topics/<Topic Name>.md` using the template), then reference it. Never leave empty.
 4. **Replace ALL frontmatter placeholders** — every YAML array field (`sources: []`, `topics: []`) must be filled with real values **BEFORE calling obsidian_write**. The content string's YAML frontmatter is what gets written as note properties — body text sections (`## Sources:`) are NOT parsed as frontmatter. **This is the #1 cause of ingest failures.** See critical warning below.
 5. Replace all `{{Placeholders}}` with real content — remove template scaffolding text
 6. Both `## Related` and `## Sources` sections present at the end (templates include these)
