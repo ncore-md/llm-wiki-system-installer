@@ -17,9 +17,9 @@ aliases: []
 
 {{What this topic covers — key sub-areas and related concepts.}}
 
-## Related Topics
+## Related
 
-{{Wikilinks to closely related topics: [[Related Topic]].}}
+- [[Related Topic]]
 
 ## Sources
 

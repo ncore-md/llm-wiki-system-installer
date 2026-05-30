@@ -21,7 +21,7 @@ q
 
 ## Related
 
-{{Brief note about how this entity relates to others.}}
+- [[Related Entity]]
 
 ## Sources
 

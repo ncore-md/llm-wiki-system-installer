@@ -2,7 +2,8 @@
 Title: "{{Title}}"
 Author: "{{Author}}"
 Reference: "{{Source URL}}"
-ContentType: source
+ContentType:
+  - {{video|article|markdown|pdf}}
 Created: "{{Created}}"
 Processed: false
 tags:
@@ -11,4 +12,4 @@ tags:
 
 # {{Title}}
 
-{{Source summary — what this raw document contains and its key takeaways.}}
+{{Raw source content — cleaned of timestamps/promo lines but otherwise faithful to original. Do NOT summarize or distill; that belongs in compiled Wiki notes.}}

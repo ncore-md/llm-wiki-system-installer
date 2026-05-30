@@ -23,7 +23,7 @@ aliases: []
 
 ## Related
 
-{{Links to related concepts or entities.}}
+- [[Related Concept]]
 
 ## Sources
 

@@ -82,11 +82,9 @@ cd <wiki-root> && python3 scripts/wiki_shared.py config --force 2>&1
 Returns JSON with:
 - `permissions` — what operations are allowed (`read`, `write`, `ingest`, `maintain`). Skip write/ingest if not present.
 - `raw_paths` — **absolute paths** to raw source directories (from config). Always uses --force so values are fresh.
-- `tag_routing` — maps tags to wiki folders (e.g., `{"concept": "Wiki/Concepts", ...}`).
-- `paths` — relative paths to `_templates`, `Wiki`, `Schema` (relative to wiki root).
-- `tag_routing` — maps tags to wiki folders (may differ per vault, e.g., NLite uses `Wiki/Layers/`)
-- `allowed_compiled_tags` — valid tags for wiki notes
-- `paths` — relative paths to `_templates`, `Wiki`, `Schema`
+- `tag_routing` — maps folder names to tags (e.g., `{"Topics": "topic", "Concepts": "concept"}`). Per-vault — defined in AGENTS.md's `tag_routing` checklist field. Defaults to standard map if absent.
+- `allowed_compiled_tags` — valid tags for wiki notes (discovered from tag_routing)
+- `paths` — relative paths to `_templates`, `Wiki`, `Schema` (relative to wiki root)
 
 The `--force` flag is always used in this skill to guarantee fresh paths. The staleness-refresh path in `discover_config()` also updates raw_paths from actual directories even without --force, but --force is the reliable option.
 
@@ -156,7 +154,7 @@ These operations are **wiki-specific** and run from the wiki directory. They enf
 | `python3 scripts/wiki_tool.py search-catalog --query "..."` | Search structured catalog index (title, tags, topics, sources). Uses word-level matching — any query term triggers a match. No need to run multiple queries for multi-word searches.
 | `python3 scripts/wiki_tool.py build` | Rebuild catalog.jsonl, index.md, per-folder indexes from all wiki notes |
 | `python3 scripts/wiki_tool.py lint` | Validate frontmatter schema: tags, dates (YYYY-MM-DD), source paths resolve, source_count consistency, required sections |
-| `python3 scripts/wiki_tool.py source-scan --update --accept-covered` | Scan configured raw paths, update manifest with coverage state and source counts |
+| `python3 scripts/wiki_tool.py source-scan --update --accept-covered` | Scan configured raw paths, update manifest with coverage state and source counts. Validates all wiki notes in `covered_by` still exist on disk (removes stale entries automatically). |
 
 Run these from the wiki root directory (the same directory that contains `AGENTS.md`, `_templates/`, and `scripts/wiki_tool.py`).
 
@@ -172,15 +170,18 @@ Run these from the wiki root directory (the same directory that contains `AGENTS
 | C1 | **Read config for ALL paths** before writing anything | `python3 scripts/wiki_shared.py config --force` — store values in variables (`RAW_PATH`, `WIKI_FOLDER`, etc.) |
 | C2 | **Pre-write YAML verification** — confirm frontmatter has real values before calling write tool | Visually inspect: `sources:` must have entries, not empty `[]`; `topics:` must have ≥1 wikilink; `tags:` must be array |
 | C3 | **Post-write re-read** — verify file has both frontmatter AND body content after every write |
+| C11 | **Source body integrity** — verify cleaned source preserved full content (not truncated) | Compare line count before/after cleaning. If body dropped >50% of original lines, RE-DO with in-context editing (no script). |
+| C0 + C11 | **Combined read-back** — after cleaning, verify BOTH: (a) no timestamp/promo/image patterns remain (`grep '\*\*[0-9]' file` must return 0), AND (b) line count preserved within tolerance | Read first and last 50 lines of the cleaned file. Confirm content flows naturally with no artifacts.
 | C4 | **Sources hard gate** — block if any note has empty `sources:` array | `grep -r 'sources: \[\]' <WIKI_FOLDER>/ — if any output, FIX immediately before proceeding |
 | C5 | **Array format verification** — block if any multi-value field uses scalar form | `grep -A2 'sources:' <WIKI_FOLDER>/*md — must show block-array format, not scalar |
 | C6 | **Topics required** — concept/entity notes must have ≥1 topic wikilink (from parsed rules) | `grep -A2 'topics:' <WIKI_FOLDER>/*md — must have at least one entry |
-| C7 | **Key point count** — concept/entity notes body ≤5 key points (~10-12 lines) | `grep -c '^\- \*\*' <WIKI_FOLDER>/<Note Name>.md — should be ≤5. Matches only bold-lead-in key points (e.g., `- **text**`). If >5, rewrite as distilled bullets. |
+| C7 | **Topics required** — concept/entity notes must have ≥1 topic wikilink (from parsed rules) | `grep -A2 'topics:' <WIKI_FOLDER>/*md — must have at least one entry |
 | C8 | **Required sections** — every compiled note must have `## Related` AND `## Sources` in body | `grep -c '^## Related\|^## Sources' <WIKI_FOLDER>/<Note Name>.md — must return count of required sections |
 | C9 | **On-disk filename match** — verify frontmatter source paths match actual filenames on disk (especially for apostrophes, curly quotes) | `ls <RAW_PATH>/ | grep <keyword>` — compare against frontmatter |
+| C0 | **Read-back source body** — after cleaning, explicitly read back the cleaned file and verify NO timestamp patterns (`**X:XX** ·`, `HH:MM:SS - Title`), promo lines, or image embeds remain | Read first 50 and last 50 lines of the cleaned source file. If any timestamp/promo pattern found, clean again before proceeding to Step 2 |
 | C10 | **Pre-commit lint** — run `lint` + `source-lint` explicitly before asking user to commit | `python3 scripts/wiki_tool.py lint && python3 scripts/wiki_tool.py source-lint` |
 
-**Hard rule:** If C4 triggers (empty sources), do NOT proceed to Step 5 or beyond. Fix immediately, re-verify, then continue.
+**Hard rule:** If C0 triggers (timestamp/promo patterns remain) or C4 triggers (empty sources), do NOT proceed to Step 2. Fix immediately, re-verify, then continue.
 
 ### Step 0 - Check for Pending Sources
 **Action:** Before asking the user for a source, discover vault config and check each validated vault's raw paths for files that need processing.
@@ -200,7 +201,7 @@ rules = parse_rules('.')  # uses AGENTS.md at current directory
 print(json.dumps(rules, indent=2))
 "
 ```
-Store the parsed rules in context (max_key_points, required_sections, allowed_tags, topics_required_for). If parsing fails or AGENTS.md is missing, fall back to defaults: max_key_points=5, required_sections=[## Related, ## Sources], allowed_tags=[topic, concept, entity, project].
+Store the parsed rules in context (max_topics, required_sections, allowed_tags, topics_required_for, tag_routing, source_tag). If parsing fails or AGENTS.md is missing, fall back to defaults: max_topics=5, required_sections=[## Related, ## Sources], allowed_tags=[topic, concept, entity, project].
 
 **Permission Check:** If `permissions` does not include `"ingest"` or `"write"`, skip Steps 1–9 for this vault. Report: "Vault '<name>' has <permissions> — skipping ingest operations." Continue to the next vault.
 
@@ -307,18 +308,12 @@ python3 scripts/wiki_shared.py models note_generation
 
 **Source Validation:** Before processing any unprocessed file, check its type and content:
 - **Image files** (`.jpg`, `.png`, `.webp`): Analyze via a subagent with the `llm-wiki-vl` skill (see **Image Processing** below). Continue to Steps 2–9 as normal (use the image path in source references). No frontmatter needed — these are treated as visual sources, not markdown.
-- **Markdown files** (`.md`): Read the full file first. Verify it has proper frontmatter (`title`, `source`). Check that:
-  - **Tag mapping:** The `tags` value must resolve to one of the allowed wiki tags (`concept`, `topic`, or `entity`).
-    - If it's already one of those → use as-is.
-    - If it's a non-standard tag (e.g., `clippings`, `youtube`, `article`, etc.) → map to the closest wiki tag based on content:
-      - Factual/definitional content about a specific idea → `concept`
-      - Broad subject area covering multiple ideas → `topic`
-      - Person, organization, tool, brand → `entity` (but tools can also go to `concept` if discussing the tool's behavior)
-    - If ambiguous → default to `concept`.
-  - **Array format:** Multi-value fields MUST use YAML block-array syntax (`tags:\n  - concept`), never scalar form.
-  - Fields are clean (no promotional URLs or junk in values like `description`) 
+- **Markdown files** (`.md`): Read the full file first. Verify it follows `_templates/source-note.md`: proper frontmatter with `Title`, `Reference` (URL), `ContentType: [video|article|markdown|pdf]`, `Created` (YYYY-MM-DD), and `tags: [source]`. Check that:
+  - **ContentType:** Must be one of the vault's allowed content types (`video`, `article`, `markdown`, `pdf`). If missing or invalid, fix it before proceeding.
+  - **Array format:** Multi-value fields MUST use YAML block-array syntax (`ContentType:\n  - video`), never scalar form.
+  - Fields are clean (no promotional URLs or junk in values)
   - The file has substantive body content beyond frontmatter
-  Files that fail these checks should be fixed in place (clean the frontmatter, fix tag mapping, normalize format) before proceeding. Files that are empty or contain only images/embeds without text should be flagged and removed.
+  Files that fail these checks should be fixed in place (clean the frontmatter, normalize format) before proceeding. Files that are empty or contain only images/embeds without text should be flagged and removed.
 - **Other files**: Skip unless clearly a usable content source.
 
 **Image Processing:** Each unprocessed image must be analyzed and converted into wiki notes. Choose the approach that matches your capabilities:
@@ -328,7 +323,7 @@ python3 scripts/wiki_shared.py models note_generation
 
 **Model warm-reuse (subagent path only):** The cache flag `defaults.agent_has_vision: True` plus the task override for `image_ingest` keep the ~20GB VL model loaded between subagent calls. After one initial cold start (60-90s), subsequent calls reuse the warm model (~10-20s). Spawn each subagent as a separate call — no batching. If you are analyzing images directly, this warm-reuse does not apply.
 
-**Enforce Core Rule #2:** Each generated note must have **3–5 key points max**, ≤10 body lines, and at least 1 `topics` wikilink. If the image contains information for more than one concept, split into separate notes — don't create a single long note.
+**Multi-note extraction:** If the image contains multiple distinct concepts, tools, or features, produce separate notes for each. Use `---NOTE_BOUNDARY---` to separate them.
 
 **Pre-step: Collect existing topic titles and real image filenames** (so the subagent can populate `topics` with real wikilinks and use correct source paths):
    ```bash
@@ -425,19 +420,29 @@ subagent({
 ### Step 1 — Clean & Store Raw Source
 **Action:** Write cleaned Markdown into the vault's configured raw paths (from config `raw_paths`) using the native tools. Use the first writable path in the list (e.g., `Raw/Sources/`). **Skip this step for image files** — they bypass cleaning entirely and go from VL analysis (Step 0) directly to Steps 2–9.
 
-**⚠️ RULE: Never write a one-off cleaning script.** Cleaning is done in your context — read the source, mentally strip noise, and write directly with `obsidian_write`. Writing intermediate scripts to process files risks corrupting frontmatter, losing fields (like `source` URLs), and adding unnecessary complexity. The only scripts you write are the ones documented in this skill (source-scan, catalog search, VL discovery). Everything else is handled by `obsidian_write` / `obsidian_append`.
+**⚠️ CORE PRINCIPLE: Sources are source-faithful. Do NOT summarize, distill, or editorialize.**
+Source files preserve ALL factual content from the original. They are NOT summaries, key-point lists, or distilled notes — that's what compiled Wiki notes (Steps 2–9) are for. Source cleaning is about removing noise, not content.
 
-**Cleaning workflow:**
-1. **Read the full file content** with `read` or `obsidian read`. Do NOT assume line numbers, frontmatter boundaries, or file structure. Understand the complete layout before any edit.
-2. Identify what to keep (factual claims, context, key points) and what to remove
-3. Write the cleaned version with `obsidian_write`, preserving all frontmatter fields.
-4. **Verify after writing:** Read the file back to confirm it has both frontmatter AND body content before proceeding. Never trust a write without re-reading.
+**Deterministic transforms (scripts ALLOWED):** Bulk, pattern-based operations on known formats are safe and encouraged for large files:
+- Remove timestamps: `**0:08** ·`, chapter markers (`01:10 Title`)
+- Remove `[music]`, `[snorts]` filler markers
+- Strip promo lines: "Subscribe", "Link in description", Kickstarter/Discord/Steam links
+- Normalize frontmatter keys: lowercase → TitleCase (`title` → `Title`, `source` → `Reference`)
+- Convert YAML format: scalar arrays to block-array (`tags: [source]` → `tags:\n  - source`)
+
+**Editorial decisions (in-context ONLY):** Content judgment must be done in your context using `obsidian_write`:
+- Removing navigational clutter (sidebar links, footer text)
+- Deciding whether a line is promotional vs. substantive
+- Handling ambiguous cases not covered by patterns
+
+**⚠️ RULE: Never write a one-off script for editorial cleaning.** Scripts are only safe for deterministic, pattern-based transforms. Writing scripts that make content decisions risks losing substantive material and adding hidden state.
 
 **⚠️ CRITICAL: Always read the full file before editing.** Never use line-index slicing (e.g., `lines[13:]`) without first verifying the file structure. Frontmatter boundaries vary by source — always find `---` delimiters programmatically or visually before assuming positions.
 
-**What to remove:** navigation bars, sidebar links, "Subscribe" prompts, affiliate disclaimers, footer text, embedded video players/images, social media widgets. **For video transcripts:** also strip timestamps (`**0:08** ·`, `**14:14** ·`), filler words (`you know`, `eh?`, `[snorts]`, `[music]`), social media handles/hashtags, subscribe prompts. The cleaned source should read like a structured article — not timestamped dialogue.
-**What to keep:** all factual content, quotes, data points, technical explanations, paper names/authors/institutions/dates, quantitative results (accuracy numbers, benchmarks), core arguments and conclusions. Preserve frontmatter fields.
-**Frontmatter must include:** `title`, `source` (URL), `author`, `published`, `created`, and `tags`. For the `topics` field, use Step 2 catalog search results to populate with relevant topic wikilinks.
+**What to remove (deterministic):** timestamps (`**0:08** ·`, `01:10 Chapter`), `[music]`/`[snorts]` markers, promo lines (subscribe prompts, Kickstarter/Discord/Steam links, "link in description"), image embeds (`![](...)`).
+**What to keep (source-faithful): ALL factual content.** Quotes, data points, technical explanations, paper names/authors/institutions/dates, quantitative results (accuracy numbers, benchmarks), core arguments and conclusions. Preserve every fact from the original.
+**⚠️ NO TRUNCATION:** Scripts must never truncate body content. Remove only deterministic noise (timestamps, promo lines). All factual/structural content must be preserved 100%. For large files (>5,000 chars), use in-context editing with `obsidian_write` instead of scripts.
+**Frontmatter must include:** `Title`, `Author` (optional), `Reference` (URL/path), `ContentType: [video|article|markdown|pdf]`, `Created` (YYYY-MM-DD), and `tags: [source]`. Match the `_templates/source-note.md` schema exactly. The `topics` field is NOT used in source notes — it belongs to compiled wiki notes.
 
 Use `obsidian_write` tool:
 ```
@@ -457,6 +462,10 @@ Replace `$RAW_PATH` with the first writable path from config `raw_paths`.
 ls $(python3 scripts/wiki_shared.py config --force 2>/dev/null | python3 -c "import sys,json; print(json.load(sys.stdin)['raw_paths'][0])") | grep <keyword>
 ```
 or use the first `raw_path` from config discovery. If the CLI normalized characters (e.g., curly apostrophe → straight), use the **actual on-disk name** in all subsequent frontmatter references. See **Unicode normalization** above for details.
+
+**C0 — Mandatory read-back:** After cleaning, explicitly read the first 50 and last 50 lines of the cleaned source file. Verify NO timestamp patterns (`**X:XX** ·`, `HH:MM:SS - Title`), promo lines, or image embeds remain. If any found, clean again before proceeding to Step 2.
+
+**C11 — Line count check:** Compare line counts before/after cleaning. If body dropped >50% of original lines, RE-DO with in-context editing (no script).
 
 Continue to Steps 2–9 as normal.
 
@@ -509,33 +518,34 @@ obsidian create path="$WIKI_FOLDER/<Note Name>.md" vault=<vault-name> overwrite 
 Replace `$WIKI_FOLDER` with the folder from config's `tag_routing` for this tag.
 ```
 
-**Tag routing** (from config `tag_routing`):
-| Tag | Folder | What goes here |
-|-----|--------|----------------|
-| `topic` | from config (`Wiki/Topics`) | Broad subject areas (e.g., "LLM Wiki") |
-| `concept` | from config (`Wiki/Concepts`) | Discrete ideas, definitions, mechanisms (e.g., "Shared Memory Layer") |
-| `entity` | from config (`Wiki/Entities`) | People, organizations, tools (e.g., "Wanderloots") |
-| `project` | from config (`Wiki/Projects`) | Initiatives with scope and status |
+**Tag routing** (from config `tag_routing` — defined per-vault in AGENTS.md's `tag_routing` checklist field):
+| Tag | Folder (from config) | What goes here |
+|-----|----------------------|----------------|
+| `topic` (default) | from config (`Wiki/Topics`) | Broad subject areas (e.g., "LLM Wiki") |
+| `concept` (default) | from config (`Wiki/Concepts`) | Discrete ideas, definitions, mechanisms |
+| `entity` (default) | from config (`Wiki/Entities`) | People, organizations, tools |
+| `project` (default) | from config (`Wiki/Projects`) | Initiatives with scope and status |
+| *(vault-specific)* | from config | Custom tags: vaults may define additional mappings in AGENTS.md `tag_routing` |
 
-Use `discover_config()` or `get_config()` to get the routing table — it may differ per vault (e.g., NLite uses `Wiki/Layers/` instead of standard folders). Validate new tags against config's `allowed_compiled_tags`. |
+Use `discover_config()` or `get_config()` to get the routing table — it may differ per vault. Validate new tags against config's `allowed_compiled_tags`. |
 
 **Core rules (strictly enforced):**
-- **One concept per note, 3–5 key points max.** Count bullet/numbered items in the body. If >5, split into separate notes or truncate to only the most essential points.
+- **One concept per note.** Extract genuine knowledge — focus on depth, relevance, and completeness per concept rather than filling a template.
+- **A single raw source may contain multiple distinct concepts, tools, or architecture decisions — create one separate note per concept.** Do not summarize everything into a single shallow document.
 - **Every note must have proper frontmatter** with `tags`, `topics` (wikilinks to relevant topic notes), `sources` array, and `source_count`
 - **The `topics` field MUST contain at least 1 wikilink to an existing topic note.** If no relevant topics found, create a new topic note first (write to `Wiki/Topics/<Topic Name>.md`), then reference it. Never leave empty.
 - **Every note must include `## Related` and `## Sources` sections** in the body
-- **Max ~10 body lines total.** A note with 3–5 key points should be roughly 10–12 lines including headers, frontmatter references in Related/Sources sections.
+- **Topics must be genuinely relevant.** Each wikilink should represent a subject area the note actually covers — not generic system names.
 
 **Enforcement checklist before writing:**
 1. **Read template** — `cat $TEMPLATES_DIR/<tag>-note.md` (e.g., `_templates/concept-note.md`). Verify the template has frontmatter, `## Related`, and `## Sources` sections. Use this as your base structure.
-2. Count bullet/numbered key points — if >5, reduce to the 3–5 most essential
+2. Analyze for distinct knowledge items — does this source cover multiple concepts, tools, or decisions? Create separate notes if needed.
 3. **Populate `topics:`** — use Step 2 catalog results to pick specific, relevant topic wikilinks. Each topic must be a meaningful subject area covered by the note (not a generic system name). If no relevant topics found, create one first (write to `Wiki/Topics/<Topic Name>.md` using the template), then reference it. Never leave empty.
 4. **Replace ALL frontmatter placeholders** — every YAML array field (`sources: []`, `topics: []`) must be filled with real values **BEFORE calling obsidian_write**. The content string's YAML frontmatter is what gets written as note properties — body text sections (`## Sources:`) are NOT parsed as frontmatter. **This is the #1 cause of ingest failures.** See critical warning below.
 5. Replace all `{{Placeholders}}` with real content — remove template scaffolding text
-6. Total body lines (after frontmatter) should be ≤12
-7. Both `## Related` and `## Sources` sections present at the end (templates include these)
+6. Both `## Related` and `## Sources` sections present at the end (templates include these)
 
-8. **Hard gate — key point count:** After writing, run `grep -c '^\- \*\*' <note>` to count key point bullets. If >5, STOP and rewrite as distilled bullet points with bold lead-ins. Never include transcript text or long paragraph blocks in the body.
+7. **Topic relevance gate:** After writing, verify topics are specific and relevant (not generic system names). If >max_topics from checklist, trim to most relevant.
 
 **⚠️ CRITICAL — obsidian_write parsing behavior:**
 The `obsidian_write` tool reads ONLY the YAML frontmatter block (between `---` delimiters) to set note properties. Body text sections like `## Sources:` are completely ignored for property assignment. If you write:
@@ -599,11 +609,10 @@ topics:
 ```
 Replace `$WIKI_FOLDER` with the folder from config's `tag_routing`. If empty, add a topic reference — use Step 2 results. If no topics found, create one first (write to `Wiki/Topics/<Topic Name>.md` using the template), then reference it.
 
-3. **Key point count** — verify body has ≤5 key points and ≤12 total lines:
+3. **Topic count** — verify topics array has ≥1 and ≤max_topics entries (from parsed rules):
 ```bash
-grep -c '^\- \*\*' $WIKI_FOLDER/<Note Name>.md
-# Should be ≤5 for concepts/entities. Matches only bold-lead-in key points (e.g., `- **text**`).
-# If >5: STOP, rewrite as distilled bullet points. Do NOT include transcript text or long paragraph blocks.
+grep -A2 'topics:' $WIKI_FOLDER/<Note Name>.md | head -5
+# Must show at least one entry. Count entries — if >max_topics from AGENTS.md checklist, trim to most relevant.
 # Replace `$WIKI_FOLDER` with the folder from config's `tag_routing`.```
 
 
@@ -637,7 +646,7 @@ python3 scripts/wiki_tool.py build && python3 scripts/wiki_tool.py lint && pytho
 ```
 
 - **build** — rebuilds `catalog.jsonl`, `index.md`, and per-folder indexes from all wiki notes. Also auto-fixes empty `sources:` arrays by populating them from body text under `## Sources:` — this is a **safety net, not a substitute** for proper frontmatter. Always fill sources in YAML before writing.
-- **lint** — validates compiled note frontmatter: tag validity, dates (YYYY-MM-DD), source paths resolve on disk (`source_count` matches array length), required sections present (both `## Related` AND `## Sources` — missing either fails the check), topics consistency (concept/entity must have ≥1 topic), key point count ≤5 for concept/entity notes.
+- **lint** — validates compiled note frontmatter: tag validity, dates (YYYY-MM-DD), source paths resolve on disk (`source_count` matches array length), required sections present (both `## Related` AND `## Sources` — missing either fails the check), topics consistency (concept/entity must have ≥1 topic, ≤max_topics from checklist).
 - **source-lint** — validates raw source frontmatter (title, reference/source present, created date format) and coverage state (processed sources must have `covered_by` entries).
 
 If ANY check fails, fix the issues and repeat. This is your quality gate — Python scripts enforce rules Obsidian doesn't know about (source resolution, schema compliance). Do NOT skip `source-lint` — it catches issues that lint doesn't (raw source frontmatter, coverage state).
@@ -649,7 +658,9 @@ If ANY check fails, fix the issues and repeat. This is your quality gate — Pyt
 python3 scripts/wiki_tool.py source-scan --update --accept-covered
 ```
 
-This tracks which raw sources have been processed and how many wiki notes they produced. **Note:** Image files processed in Step 0 are not tracked by this manifest (they have no frontmatter and were never stored as markdown in the configured raw paths). Notes created from images may reference the image file path in their `sources` array if relevant, but these will not appear in source-scan output.
+This tracks which raw sources have been processed and how many wiki notes they produced. **Important:** `--accept-covered` validates that all wiki notes in `covered_by` still exist on disk and automatically removes stale entries. Sources with no valid coverage are marked unprocessed.
+
+**Note:** Image files processed in Step 0 are not tracked by this manifest (they have no frontmatter and were never stored as markdown in the configured raw paths). Notes created from images may reference the image file path in their `sources` array if relevant, but these will not appear in source-scan output.
 
 ### Step 8 — Log the Change
 **Action:** Use `wiki_tool.py log` to append a timestamped entry if the ingest meaningfully changed the Wiki (new notes created, existing notes updated).

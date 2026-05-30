@@ -21,7 +21,7 @@ aliases: []
 
 ## Related
 
-{{Brief note about how this concept relates to others, or "No direct connections yet."}}
+- [[Related Concept]]
 
 ## Sources
 
