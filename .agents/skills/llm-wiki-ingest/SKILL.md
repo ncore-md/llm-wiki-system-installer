@@ -48,11 +48,13 @@ This skill is **vault-agnostic**. It works with any Obsidian vault that contains
 ### How to select a vault:
 **FIRST — Check the invocation arguments (text after the `<skill>` block).** If one or more vault names are present, parse them as space-separated values. The special value `all` selects every declared vault.
 
+**Single-vault shortcut:** If the Pre-flight Check returns exactly one vault, skip selection and use it directly. No confirmation needed.
+
 1. **If the user explicitly named vault(s)** (e.g., "ingest into Core", `/llm-wiki-ingest Core NLite`), or they were provided as invocation arguments, use those names directly. The special value `all` means every declared vault.
    ```bash
    obsidian ... vault="<name>"
    ```
-2. **Otherwise, use the list from Pre-flight Check** (already ran `wiki_shared.py vaults`). Present it and ask: "Available vaults (from project config): [list]. Which one(s) do you want to work with? (Type **all** to select every vault.)"
+2. **Otherwise, use the list from Pre-flight Check** (already ran `wiki_shared.py vaults`). If there's more than one vault, present it and ask: "Available vaults (from project config): [list]. Which one(s) do you want to work with? (Type **all** to select every vault.)"
 
 3. **If the user mentions a wiki by name** (e.g., "the Core wiki"), do NOT assume it maps to a vault with the same name — discover from config and let them select.
 
