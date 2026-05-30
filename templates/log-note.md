@@ -1,20 +1,9 @@
 ---
-Title: ""
-Author: ""
-Reference: ""
-ContentType: note
-Created: 2026-05-04
-Processed: false
+title: "{{Title}}"
 tags:
   - log
+created: "{{Created}}"
+updated: "{{Updated}}"
 ---
 
-# {{Title}}
-
-Short summary of the log entry. What happened and when.
-
-Related: [[AGENTS.md]]
-
-## Details / Explanation
-
-{{Detailed description of what was done, why it was necessary, and any relevant notes.}}
+{{Log entry content. Timestamp, what happened, which files were affected.}}

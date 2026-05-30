@@ -55,7 +55,7 @@ aliases: []
 | `status` | No | string | Note maturity: `"seed"`, `"active"`, `"canonical"`, `"stale"`, or `"needs_review"`. Default: `"seed"`. |
 | `created` | Yes | string (date) | Date the note was first created. YYYY-MM-DD format. |
 | `updated` | Yes | string (date) | Last update date. YYYY-MM-DD format. |
-| `sources` | Yes | array of strings | Wikilinks to Raw sources, e.g. `[Raw/Sources/example-source.md]`. Actual format in notes uses double-bracket wikilinks: `[[Raw/Sources/example-source.md]]`. |
+| `sources` | Yes | array of strings | Wikilinks to Raw sources: `["[[Raw/Sources/example-source.md]]"]` in YAML frontmatter. |
 | `source_count` | Yes | integer | Must equal the length of `sources`. Used by lint checks. |
 | `aliases` | No | array of strings | Alternative names for this note (for search and linking). Can be empty. |
 

@@ -26,7 +26,7 @@ Related: [[AGENTS.md]]
 |---------|-------------|
 | `python3 scripts/wiki_tool.py source-scan` | Lists Raw sources with their processed/covered status. No mutations. |
 | `python3 scripts/wiki_tool.py source-scan --update` | Updates manifest entries for all discovered Raw sources. Creates new entries as needed. |
-| `python3 scripts/wiki_tool.py source-scan --update --accept-covered` | Updates manifest and marks sources as processed when Wiki notes cover them. Use after ingest. |
+| `python3 scripts/wiki_tool.py source-scan --update --accept-covered` | Updates manifest and marks sources as processed when Wiki notes cover them. Validates that all wiki notes in `covered_by` still exist on disk (removes stale entries automatically). Use after ingest. |
 
 ## Search & Query
 
@@ -45,6 +45,7 @@ Related: [[AGENTS.md]]
 ```bash
 # After ingesting a new source:
 python3 scripts/wiki_tool.py build && python3 scripts/wiki_tool.py lint && python3 scripts/wiki_tool.py source-scan --update --accept-covered
+# (validates that all wiki notes in covered_by still exist on disk, removes stale entries)
 
 # Pre-commit check:
 python3 scripts/wiki_tool.py doctor && python3 scripts/wiki_tool.py build && python3 scripts/wiki_tool.py lint && python3 scripts/wiki_tool.py source-lint

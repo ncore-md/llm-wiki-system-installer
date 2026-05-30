@@ -1,24 +1,30 @@
 ---
-Title: ""
-Author: ""
-Reference: ""
-ContentType: note
-Created: 2026-05-04
-Processed: false
+title: "{{Title}}"
 tags:
   - project
+topics: []
+sources: []
+source_count: 0
+status: draft
+created: "{{Created}}"
+updated: "{{Updated}}"
+aliases: []
 ---
 
-# {{Title}}
+**{{Title}}** is a brief description of the project, its goal, and current status.
 
-Short project summary.
+## Goal
 
-Related: [[AGENTS.md]], [[Schema/frontmatter-schema.md]]
+{{What this project aims to achieve.}}
 
-## Key Points
+## Current Status
 
-- 
+{{Current state, blockers, next steps.}}
 
-## Details / Explanation
+## Related
 
-- 
+{{Links to related concepts or entities.}}
+
+## Sources
+
+- [[Actual Source File Name.md]]

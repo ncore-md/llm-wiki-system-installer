@@ -1,9 +1,9 @@
 ---
-Title: ""
-Author: ""
-Reference: ""
-ContentType: note
-Created: 2026-05-04
+Title: "{{Title}}"
+Author: "{{Author}}"
+Reference: "{{Source URL}}"
+ContentType: source
+Created: "{{Created}}"
 Processed: false
 tags:
   - source
@@ -11,10 +11,4 @@ tags:
 
 # {{Title}}
 
-Short source summary.
-
-Related: [[AGENTS.md]], [[Schema/frontmatter-schema.md]]
-
-## Notes
-
--
+{{Source summary — what this raw document contains and its key takeaways.}}

@@ -1,4 +1,26 @@
 # Agent Rules — LLM Wiki
+---checklist---
+max_topics: 5
+required_sections:
+  - "## Related"
+  - "## Sources"
+allowed_tags: [topic, concept, entity, project]
+topics_required_for:
+  - concept
+  - entity
+tag_routing:
+  Topics: topic
+  Concepts: concept
+  Entities: entity
+  Projects: project
+source_tag: [source]
+allowed_content_types:
+  - video
+  - article
+  - markdown
+  - pdf
+source_count_required: true
+---
 > **Optimized for Pi.** This vault is built to be agent-agnostic, but all workflows and tooling are optimized for Pi. See [[Pi (Coding Agent)]] for details.
 
 ## Related System Files
@@ -44,7 +66,7 @@
 ## Core Rules (Non-Negotiable)
 
 1. **Keep Raw source notes source-faithful.** Do not overwrite Raw content during compilation (keep the original).
-2. **Keep compiled Wiki notes short and single-purpose.** One concept per note, 3–5 key points max.
+2. **Keep compiled Wiki notes short and single-purpose.** One concept per note, one topic cluster. A single raw source may contain multiple distinct concepts — create separate notes for each.
 3. **Use plain tags only** (no formatting). Always use #tags in frontmatter, never inline.
 4. **Always keep topics and sources on every compiled Wiki note.** Even if empty (topics: [], sources: []).
 5. **Always query from `Wiki/index.md` and `Wiki/catalog.jsonl`** before opening broad context.
@@ -63,7 +85,7 @@
 
 When the user adds a new source:
 
-1. **Put cleaned Markdown in `Raw/Sources/`.** Clean up the content — remove navigation, ads, and clutter. Preserve all factual claims and context from the original source.
+1. **Put cleaned Markdown in `Raw/Sources/`.** Clean the content thoroughly — remove navigation, ads, sidebar links, footer text. For video transcripts: strip timestamps (`**0:08** ·`, `**14:14** ·`), filler words (`you know`, `eh?`, `[snorts]`, `[music]`), social media handles/hashtags, subscribe prompts. Preserve all factual claims, data points, technical explanations, paper names/authors/institutions/dates, quantitative results. The cleaned source should read like a structured article — not timestamped dialogue.
 
 2. **Search the catalog for related topics.**
    ```bash
@@ -73,10 +95,10 @@ When the user adds a new source:
 3. **Open only the most relevant compiled Wiki notes** from Step 2 results — not all Raw context. Understand what already exists before creating new notes.
 
 4. **Create or update focused notes in `Wiki/`** (correct folder per tag):
-   - Topic notes → `Wiki/Topics/` — broad subject areas
-   - Concept notes → `Wiki/Concepts/` — discrete ideas, definitions, mechanisms
-   - Entity notes → `Wiki/Entities/` — people, organizations, tools, places
-   - Project notes → `Wiki/Projects/` — initiatives with scope and status
+   - Topic notes → `Wiki/Topics/`
+   - Concept notes → `Wiki/Concepts/`  
+   - Entity notes → `Wiki/Entities/`
+   - Project notes → `Wiki/Projects/`
 
 5. **Add Raw source links to `sources`.** Keep `source_count` accurate (must equal number of entries in `sources`).
 
@@ -86,6 +108,7 @@ When the user adds a new source:
    ```
 
 7. **Update manifest:** `python3 scripts/wiki_tool.py source-scan --update --accept-covered`
+   This validates that all wiki notes in `covered_by` still exist on disk and removes stale entries automatically.
 
 8. **Add a log entry** if the ingest meaningfully changed the Wiki:
    ```bash
@@ -133,7 +156,7 @@ python3 scripts/wiki_tool.py source-scan --update --accept-covered && python3 sc
 | `python3 scripts/wiki_tool.py doctor` | Non-mutating health check (folders, Python version, catalog, manifest) |
 | `python3 scripts/wiki_tool.py build` | Rebuilds `catalog.jsonl`, `index.md`, and per-folder indexes |
 | `python3 scripts/wiki_tool.py lint` | Validates compiled note frontmatter, tags, source links, `source_count` |
-| `python3 scripts/wiki_tool.py source-scan [--update] [--accept-covered]` | Lists Raw sources; `--update` updates manifest; `--accept-covered` marks covered as processed |
+| `python3 scripts/wiki_tool.py source-scan [--update] [--accept-covered]` | Lists Raw sources; `--update` updates manifest (deduplicates apostrophe-normalized entries); `--accept-covered` marks covered as processed and validates all wiki notes in `covered_by` still exist on disk |
 | `python3 scripts/wiki_tool.py source-lint` | Validates source frontmatter and coverage state |
 | `python3 scripts/wiki_tool.py search-catalog --query "text"` | Searches compiled Wiki notes via `catalog.jsonl` |
 | `python3 scripts/wiki_tool.py log --title "t" --details "d"` | Appends a short entry to `Wiki/Logs/log.md` |

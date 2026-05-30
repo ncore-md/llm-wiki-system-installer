@@ -1,33 +1,29 @@
 ---
-Title: ""
-Author: ""
-Reference: ""
-ContentType: note
-Created: 2026-05-04
-Processed: false
+title: "{{Title}}"
 tags:
   - concept
+topics: []
+sources: []
+source_count: 0
+status: draft
+created: "{{Created}}"
+updated: "{{Updated}}"
+aliases: []
 ---
 
-# {{Title}}
-
-Short summary of the concept. Key idea and why it matters.
-
-Related: [[AGENTS.md]], [[Schema/frontmatter-schema.md]]
+**{{Title}}** is a brief, focused description of the concept (1-2 sentences).
 
 ## Key Points
 
-- 
-
-## Details / Explanation
-
-{{Detailed explanation of the concept, how it works, and its significance. Include examples where relevant.}}
+- {{Key point 1}}
+- {{Key point 2}}
+- {{Key point 3}}
 
 ## Related
 
-{{Wikilinks to related notes: [[Related Concept]], [[Related Topic]].}}
+{{Brief note about how this concept relates to others, or "No direct connections yet."}}
 
 ## Sources
 
-{{List of Raw sources this note was compiled from.}}
-- [Raw/Sources/example-source]
+{{List of sources that informed this note.}}
+- [[Actual Source File Name.md]]

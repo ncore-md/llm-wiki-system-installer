@@ -1,33 +1,29 @@
 ---
-Title: ""
-Author: ""
-Reference: ""
-ContentType: note
-Created: 2026-05-04
-Processed: false
+title: "{{Title}}"
 tags:
   - entity
+topics: []
+sources: []
+source_count: 0
+status: draft
+created: "{{Created}}"
+updated: "{{Updated}}"
+aliases: []
 ---
-
-# {{Title}}
-
-Short summary of the entity. What it is and why it matters in this context.
-
-Related: [[AGENTS.md]], [[Schema/frontmatter-schema.md]]
+q
+**{{Title}}** is a brief description of the person, organization, or tool (1-2 sentences).
 
 ## Key Points
 
-- 
-
-## Details / Explanation
-
-{{Detailed description of the entity — person, organization, tool, or place. Include relevant context and connections to other notes.}}
+- {{Key point 1}}
+- {{Key point 2}}
+- {{Key point 3}}
 
 ## Related
 
-{{Wikilinks to related notes: [[Related Note 1]], [[Related Note 2]].}}
+{{Brief note about how this entity relates to others.}}
 
 ## Sources
 
-{{List of Raw sources this note was compiled from.}}
-- [Raw/Sources/example-source]
+{{List of sources that informed this note.}}
+- [[Actual Source File Name.md]]
