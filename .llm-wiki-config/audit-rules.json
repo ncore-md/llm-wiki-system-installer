@@ -1,0 +1,68 @@
+{
+  "version": "1.0",
+
+  "secrets_patterns": [
+    {
+      "pattern": "-----BEGIN\\s+(RSA\\s+)?PRIVATE\\s+KEY-----",
+      "severity": "critical",
+      "description": "Private key detected"
+    },
+    {
+      "pattern": "sk-proj-[A-Za-z0-9]{20,}",
+      "severity": "critical",
+      "description": "OpenAI API key"
+    },
+    {
+      "pattern": "ghp_[A-Za-z0-9]{36}",
+      "severity": "critical",
+      "description": "GitHub PAT"
+    },
+    {
+      "pattern": "github_pat_[A-Za-z0-9_]{22,}",
+      "severity": "critical",
+      "description": "GitHub PAT (v2)"
+    },
+    {
+      "pattern": "Bearer\\s+[A-Za-z0-9\\-_\\.]+",
+      "severity": "critical",
+      "description": "Bearer token"
+    },
+    {
+      "pattern": "AKIA[0-9A-Z]{16}",
+      "severity": "critical",
+      "description": "AWS access key"
+    },
+    {
+      "pattern": "xoxb-[A-Za-z0-9\\-_]+|xoxp-[A-Za-z0-9\\-_]+",
+      "severity": "critical",
+      "description": "Slack token"
+    },
+    {
+      "pattern": "(password|passwd|pwd)\\s*[:=]\\s*[\\'\\\"][^\\'\\\"]+[\\'\\\"]",
+      "severity": "critical",
+      "description": "Password in config/comment"
+    }
+  ],
+
+  "skip_dirs": [".git", ".obsidian/cache", "__pycache__", "node_modules"],
+
+  "skip_files": ["wiki_tool.py", "wiki_shared.py"],
+
+  "path_scan": {
+    "enabled_in_public": true,
+    "patterns": [
+      "^/Users/",
+      "^/home/",
+      "^[A-Z]:\\\\",
+      "\\\\AppData\\\\",
+      "\\.local/share"
+    ],
+    "severity": "warning"
+  },
+
+  "wiki_checks": {
+    "broken_wikilinks": true,
+    "orphaned_notes": true,
+    "source_coverage_gaps": true
+  }
+}

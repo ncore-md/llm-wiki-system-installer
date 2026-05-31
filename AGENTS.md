@@ -29,7 +29,6 @@ source_count_required: true
 - [[Schema/frontmatter-schema.md]] — Frontmatter rules and validation definitions
 - [[Schema/naming-conventions.md]] — Naming conventions for notes, tags, and paths
 - [[Schema/lint-checklist.md]] — Pre-commit lint checklist
-- [[Schema/workflow-examples.md]] — Workflow examples for ingest, query, maintain
 - [[Schema/command-reference.md]] — CLI command reference (wiki_tool.py)
 
 ### Templates (_templates/)
@@ -42,8 +41,9 @@ source_count_required: true
 - [_templates/session-log.md] — Template for session logs
 
 ### Tooling & Skills
-- [[scripts/wiki_tool.py]] — Validation tools: build, lint, search-catalog
-- `.agents/skills/` — Agent skills (ingest, query, lint, maintain)
+- [[scripts/wiki_tool.py]] — Validation tools: build, lint, search-catalog, audit
+- `.agents/skills/` — Agent skills (ingest, query, lint, maintain, audit)
+- `.llm-wiki-config/audit-rules.json` — Configurable security scan patterns (optional, uses defaults if missing)
 - [[Welcome.md]] — Getting started guide
 
 ## Directory Structure
@@ -149,6 +149,25 @@ After source ingestion, also run:
 python3 scripts/wiki_tool.py source-scan --update --accept-covered && python3 scripts/wiki_tool.py source-lint
 ```
 
+## Security Audit (Before Push to Public Repos)
+
+**When:** Before pushing changes to a public repository (e.g., the installer repo).
+
+1. **Run fast security scan:**
+   ```bash
+   python3 scripts/wiki_tool.py security-scan --mode public
+   ```
+2. **Run full compliance audit:**
+   ```bash
+   python3 scripts/wiki_tool.py audit --mode public
+   ```
+3. **Fix critical findings** before pushing (secrets, tokens, private keys).
+4. **Review warnings** at your convenience (broken wikilinks, orphaned notes).
+
+For private repositories, run with `--mode private` — this skips local path detection (which is expected in wiki notes).
+
+Add a `.private-repo` marker file to the repo root if you want tools to skip public-mode checks.
+
 ## Scripts Reference
 
 | Command | Purpose |
@@ -160,7 +179,8 @@ python3 scripts/wiki_tool.py source-scan --update --accept-covered && python3 sc
 | `python3 scripts/wiki_tool.py source-lint` | Validates source frontmatter and coverage state |
 | `python3 scripts/wiki_tool.py search-catalog --query "text"` | Searches compiled Wiki notes via `catalog.jsonl` |
 | `python3 scripts/wiki_tool.py log --title "t" --details "d"` | Appends a short entry to `Wiki/Logs/log.md` |
-| `python3 scripts/audit_public.py` | Fails on secrets, local paths, private keys, plugin/cache state |
+| `python3 scripts/wiki_tool.py security-scan [--mode public|private]` | Fast secrets-only scan of tracked files (exit 0 = clean, exit 1 = critical) |
+| `python3 scripts/wiki_tool.py audit [--mode public|private]` | Full security + wiki compliance scan: secrets, broken wikilinks, orphaned notes, coverage gaps (exit 0 = clean, exit 1 = critical, exit 2 = warnings) |
 
 ## Obsidian CLI (Optional — Requires Running Obsidian)
 

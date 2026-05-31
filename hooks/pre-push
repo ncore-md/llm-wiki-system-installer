@@ -1,0 +1,27 @@
+#!/bin/bash
+# LLM Wiki pre-push hook — security gate for public repositories.
+# Install with: cp hooks/pre-push .git/hooks/pre-push
+
+set -e
+
+REPO_ROOT="$(git rev-parse --show-toplevel)"
+cd "$REPO_ROOT"
+
+echo "Running LLM Wiki pre-push security audit..."
+
+# Skip if this is a private repo (marker file present)
+if [ -f ".private-repo" ]; then
+    echo "Skipping — .private-repo marker found. This is a private repo."
+    exit 0
+fi
+
+# Run fast security scan (secrets only)
+echo "  [1/2] Running security scan..."
+python3 scripts/wiki_tool.py security-scan --mode public || { echo "FAIL: secrets detected in tracked files. Fix before pushing."; exit 1; }
+
+# Run full compliance audit
+echo "  [2/2] Running compliance audit..."
+python3 scripts/wiki_tool.py audit --mode public || { echo "FAIL: critical findings in compliance audit. Fix before pushing."; exit 1; }
+
+echo "OK: Pre-push security audit passed."
+exit 0

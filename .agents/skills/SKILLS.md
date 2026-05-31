@@ -2,7 +2,20 @@
 
 **Agent-optimized skills for the LLM Wiki knowledge base system.**
 
-These six skills provide a complete pipeline: from first-time setup through source ingestion, knowledge querying, quality validation, and periodic maintenance. Image analysis is handled by a dedicated vision-language skill injected as a subagent during ingestion.
+These seven skills provide a complete pipeline: from first-time setup through source ingestion, knowledge querying, quality validation, security auditing, and periodic maintenance. Image analysis is handled by a dedicated vision-language skill injected as a subagent during ingestion.
+
+---
+
+## System Documentation (Cross-reference)
+
+| Document | What it covers |
+|---|---|
+| [[system-overview]] | High-level architecture, two-layer structure (config + shared system), directory layout |
+| [[entity-hierarchy-data-flow]] | Entity hierarchy, data flow between layers (config → AGENTS.md → tag routing → raw/compiled/catalog), frontmatter contract, note relationships |
+| [[shared-infrastructure]] | Shared infrastructure (wiki_shared.py, wiki_tool.py), external tools (obsidian-cli, defuddle), design principles |
+| [[ingest-pipeline]] | Complete ingest pipeline (Steps 0–9) with mandatory checklist, vault selection logic, image processing via VL subagent |
+| [[query-maintenance]] | Query read path, maintenance pipeline (doctor → build → lint → source-lint), security audit before push |
+| [[llm-wiki-audit]] | Security and compliance audit: secrets detection, broken wikilinks, orphaned notes, source coverage gaps |
 
 ---
 
@@ -16,6 +29,7 @@ These six skills provide a complete pipeline: from first-time setup through sour
 | **[maintain](llm-wiki-maintain/)** | Health checks: rebuild catalog, verify coverage, report issues | Periodic maintenance or before meaningful commits |
 | **[vl](llm-wiki-vl/)** | Analyze images → produce wiki notes (subagent-only) | Automatically injected into ingest when image sources are found |
 | **[setup](llm-wiki-setup/)** | Create `.llm-wiki-config/config.json` when missing | First-time run, no config found |
+| **[audit](llm-wiki-audit/)** | Security & compliance: secrets, broken refs, orphans, coverage gaps | Before push to public repos; user request
 
 ---
 
@@ -29,10 +43,12 @@ ingest  ──┬──► Raw/Sources/ cleaned markdown
           └──► vl subagent (for image sources: analyze → notes)
 
 query   ──► catalog search → read compiled Wiki notes → synthesize answer
-lint    ──► wiki_tool.py lint + source-lint → report issues
-maintain ─► doctor + build + lint + source-lint → health report
+lint    ──► wiki_tool.py lint + source-lint → report issues (schema quality)
+maintain ─► doctor + build + lint + source-lint → health report (system state)
+audit   ──► wiki_tool.py audit + security-scan → report issues (security & compliance)
 
-Before commit: maintain (or lint) validates everything
+Before commit: maintain validates everything
+Before push to public repos: audit --mode public blocks on critical findings
 ```
 
 ### Dependencies
@@ -45,6 +61,7 @@ Before commit: maintain (or lint) validates everything
 | **query** | `catalog.jsonl` (built by wiki_tool.py) | Read path. Prefers compiled Wiki notes over raw sources. |
 | **lint** | `wiki_tool.py lint + source-lint` | Lightweight validation. Pre-commit gate. |
 | **maintain** | `wiki_tool.py` (all commands) | Broader than lint. Includes catalog rebuilds and health checks. |
+| **audit** | `wiki_tool.py` (audit + security-scan), audit-rules.json | Security & compliance. Runs before push to public repos, separate from lint (schema quality). |
 
 ---
 
@@ -63,8 +80,9 @@ These are not skills themselves but support all of them:
 | Component | Purpose |
 |---|---|
 | **`wiki_shared.py`** | Config discovery, model resolution (`resolve_model()`), VL discovery, shared utilities |
-| **`wiki_tool.py`** | `build`, `lint`, `source-lint`, `search-catalog`, `source-scan`, `log` |
+| **`wiki_tool.py`** | `build`, `lint`, `source-lint`, `search-catalog`, `source-scan`, `log`, **`security-scan`**, **`audit`** |
 | **`.llm-wiki-config/config.json`** | Source of truth: vault declarations, permissions, model defaults |
+| **`.llm-wiki-config/audit-rules.json`** | Configurable security scan patterns (secrets, paths to skip). Optional — uses built-in defaults if missing. |
 | **Schema/** | Frontmatter rules (`frontmatter-schema.md`), lint checklist, naming conventions, cache |
 | **`_templates/`** | Note templates per tag type (concept, entity, topic, project, log) |
 | **`AGENTS.md` checklist** | Per-vault rules: `max_topics`, `required_sections`, **`tag_routing`**, etc. |
@@ -107,4 +125,5 @@ Wiki skills depend on these Obsidian and web tools installed at `/Users/bernardo
 | Query the wiki | `/llm-wiki-query <question>` or `skill: llm-wiki-query` |
 | Validate before commit | `/llm-wiki-lint` or `skill: llm-wiki-lint` |
 | Health check & rebuild | `/llm-wiki-maintain` or `skill: llm-wiki-maintain` |
+| Security audit | `/llm-wiki-audit` or `skill: llm-wiki-audit`, or CLI: `wiki_tool.py audit --mode public|private` |
 | Image analysis (internal) | Injected automatically via `skill: llm-wiki-vl` subagent |

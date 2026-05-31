@@ -12,6 +12,15 @@ Required commands:
   search-catalog --query "text"  Search compiled Wiki notes through the catalog.
   log --title "t" --details "d" Append a short entry to Wiki/Logs/log.md.
 
+Security / Audit commands:
+  security-scan [--mode public|private]  Fast secrets-only scan of tracked files.
+                                          Exit 0 = clean, exit 1 = critical findings.
+  audit [--mode public|private]           Full security + wiki compliance scan.
+                                          Checks secrets, broken wikilinks, orphaned notes,
+                                          source coverage gaps, and (public mode) local paths.
+                                          Exit 0 = clean, exit 1 = critical findings,
+                                          exit 2 = warnings only.
+
 Uses only the Python standard library.
 """
 
@@ -78,6 +87,27 @@ FOLDER_FOR_TAG = {
     "concept": os.path.join(WIKI_DIR, "Concepts"),
     "entity": os.path.join(WIKI_DIR, "Entities"),
     "project": os.path.join(WIKI_DIR, "Projects"),
+}
+
+# Directories whose .md files contain docstring/template placeholders,
+# not real wiki references. Skipped by _check_broken_wikilinks().
+WIKILINK_SKIP_DIRS = {
+    ".agents/skills",     # skill docs use example paths (Raw/Sources/image.png, etc.)
+    "_templates",         # template scaffolding (Related Concept, Actual Source File Name.md)
+    "Schema",             # schema docs use example paths (Topic Name, knowledge-graphs)
+}
+
+# Auto-generated index files that use title-cased wikilinks.
+# Obsidian resolves these fine (case-insensitive match), but exact
+# string comparison in the audit tool reports them as broken.
+WIKILINK_SKIP_INDEX = True
+
+# Individual files to skip when scanning for broken wikilinks.
+WIKILINK_SKIP_FILES = {
+    "scripts/wiki_tool.py",
+    "Welcome.md",         # scaffold docs with directory references
+    "AGENTS.md",          # contains external references (e.g. Pi, Coding Agent) not in vault
+    "README.md",          # documentation examples (Existing Topic, Raw/Sources/file.md)
 }
 
 
@@ -1251,6 +1281,474 @@ def cmd_log(args):
 
 
 # ---------------------------------------------------------------------------
+# Security / Audit commands
+# ---------------------------------------------------------------------------
+
+_DEFAULT_AUDIT_RULES = {
+    "secrets_patterns": [
+        {"pattern": r"-----BEGIN\s+(RSA\s+)?PRIVATE\s+KEY-----", "severity": "critical",
+         "description": "Private key detected"},
+        {"pattern": r"sk-proj-[A-Za-z0-9]{20,}", "severity": "critical",
+         "description": "OpenAI API key"},
+        {"pattern": r"ghp_[A-Za-z0-9]{36}", "severity": "critical",
+         "description": "GitHub PAT"},
+        {"pattern": r"github_pat_[A-Za-z0-9_]{22,}", "severity": "critical",
+         "description": "GitHub PAT (v2)"},
+        {"pattern": r"Bearer\s+[A-Za-z0-9\-_\.]+", "severity": "critical",
+         "description": "Bearer token"},
+        {"pattern": r"AKIA[0-9A-Z]{16}", "severity": "critical",
+         "description": "AWS access key"},
+        {"pattern": r"xoxb-[A-Za-z0-9\-_]+|xoxp-[A-Za-z0-9\-_]+", "severity": "critical",
+         "description": "Slack token"},
+        {"pattern": r"(password|passwd|pwd)\s*[:=]\s*[\'\"][^\'\"]+[\'\"]", "severity": "critical",
+         "description": "Password in config/comment"},
+    ],
+    "skip_dirs": [".git", ".obsidian/cache", "__pycache__", "node_modules",
+                  ".llm-wiki-config", "Schema/.llm-wiki-cache.json"],
+    "skip_files": ["audit_public.py", "wiki_tool.py",
+                   "wiki_shared.py"],
+    "path_scan": {
+        "enabled_in_public": True,
+        "patterns": [r"^/Users/", r"^/home/", r"^[A-Z]:\\\\",
+                     r"\\AppData\\", r"\.local/share"],
+        "severity": "warning",
+    },
+    "wiki_checks": {
+        "broken_wikilinks": True,
+        "orphaned_notes": True,
+        "source_coverage_gaps": True,
+    },
+}
+
+
+def _load_audit_rules():
+    """Load audit rules from .llm-wiki-config/audit-rules.json or return defaults."""
+    config_dir = os.path.join(REPO_ROOT, ".llm-wiki-config")
+    rules_path = os.path.join(config_dir, "audit-rules.json")
+    if os.path.isfile(rules_path):
+        try:
+            with open(rules_path, "r", encoding="utf-8") as f:
+                user_rules = json.load(f)
+            # Merge: defaults + user overrides
+            merged = dict(_DEFAULT_AUDIT_RULES)
+            for key in ("secrets_patterns", "skip_dirs", "skip_files"):
+                if key in user_rules:
+                    merged[key] = user_rules[key]
+            for section in ("path_scan", "wiki_checks"):
+                if section in user_rules and isinstance(user_rules[section], dict):
+                    merged.setdefault(section, {})
+                    merged[section].update(user_rules[section])
+            return merged
+        except (json.JSONDecodeError, IOError):
+            pass
+    return dict(_DEFAULT_AUDIT_RULES)
+
+
+def _get_tracked_files():
+    """Return list of tracked git files (relative paths). Falls back to all .md if not a git repo."""
+    try:
+        import subprocess
+        result = subprocess.run(
+            ["git", "ls-files"],
+            capture_output=True, text=True, cwd=REPO_ROOT
+        )
+        if result.returncode == 0:
+            return [f.strip() for f in result.stdout.splitlines() if f.strip()]
+    except (FileNotFoundError, subprocess.SubprocessError):
+        pass
+    # Fallback: scan all .md files in repo root (non-recursive, matches git ls-files behavior)
+    md_files = []
+    for root, dirs, files in os.walk(REPO_ROOT):
+        # Skip hidden/special directories
+        dirs[:] = [d for d in dirs if not d.startswith(".") or d == ".git"]
+        for fname in files:
+            if fname.endswith(".md"):
+                md_files.append(os.path.relpath(
+                    os.path.join(root, fname), REPO_ROOT
+                ))
+    return md_files
+
+
+def _scan_for_secrets(tracked_files, rules):
+    """Scan tracked files for secrets. Returns list of (rel_path, line_no, severity, description)."""
+    findings = []
+    skip_dirs = set(rules.get("skip_dirs", []))
+    skip_files_set = set(rules.get("skip_files", []))
+
+    for rel_path in tracked_files:
+        # Skip files matching skip list (basename check)
+        if os.path.basename(rel_path) in skip_files_set:
+            continue
+        # Skip dirs matching skip list (check each path component)
+        parts = rel_path.replace("\\", "/").split("/")
+        if any(part in skip_dirs for part in parts):
+            continue
+
+        full_path = os.path.join(REPO_ROOT, rel_path)
+        if not os.path.isfile(full_path):
+            continue
+
+        try:
+            with open(full_path, "r", encoding="utf-8", errors="replace") as f:
+                lines = f.readlines()
+        except (IOError, OSError):
+            continue
+
+        for line_no, line in enumerate(lines, start=1):
+            # Skip comment lines (GitHub Actions secrets are often commented)
+            stripped = line.strip()
+            if not stripped or stripped.startswith("#"):
+                continue
+
+            for rule in rules.get("secrets_patterns", []):
+                pattern = rule["pattern"]
+                try:
+                    if _re.search(pattern, line):
+                        findings.append((rel_path, line_no,
+                                         rule["severity"],
+                                         rule["description"]))
+                        break  # One finding per line max
+                except _re.error:
+                    pass  # Skip malformed patterns
+
+    return findings
+
+
+def _scan_for_local_paths(tracked_files, rules):
+    """Scan tracked files for local file paths. Returns list of (rel_path, line_no, pattern_match)."""
+    findings = []
+    skip_dirs = set(rules.get("skip_dirs", []))
+    path_rules = rules.get("path_scan", {})
+
+    if not path_rules.get("enabled_in_public", True):
+        return findings
+
+    skip_files_set = set(rules.get("skip_files", []))
+    path_patterns = path_rules.get("patterns", [])
+
+    for rel_path in tracked_files:
+        if os.path.basename(rel_path) in skip_files_set:
+            continue
+        parts = rel_path.replace("\\", "/").split("/")
+        if any(part in skip_dirs for part in parts):
+            continue
+
+        full_path = os.path.join(REPO_ROOT, rel_path)
+        if not os.path.isfile(full_path):
+            continue
+
+        try:
+            with open(full_path, "r", encoding="utf-8", errors="replace") as f:
+                lines = f.readlines()
+        except (IOError, OSError):
+            continue
+
+        for line_no, line in enumerate(lines, start=1):
+            stripped = line.strip()
+            if not stripped or stripped.startswith("#"):
+                continue
+
+            for pat in path_patterns:
+                try:
+                    if _re.search(pat, line):
+                        findings.append((rel_path, line_no, pat))
+                        break  # One finding per line max
+                except _re.error:
+                    pass
+
+    return findings
+
+
+def cmd_security_scan(args=None):
+    """Fast secrets-only scan of tracked files.
+
+    Usage: wiki_tool.py security-scan [--mode public|private]
+
+    Exit codes:
+      0 — clean (no secrets found)
+      1 — critical findings detected
+    """
+    mode = "private"
+    if args and len(args) >= 2:
+        if args[0] == "--mode":
+            mode = args[1]
+
+    rules = _load_audit_rules()
+    tracked_files = _get_tracked_files()
+
+    if not tracked_files:
+        print("OK: no tracked files to scan.")
+        return True
+
+    findings = _scan_for_secrets(tracked_files, rules)
+
+    if not findings:
+        print("OK: no secrets detected.")
+        return True
+
+    # Report findings
+    critical = [f for f in findings if f[2] == "critical"]
+    print(f"CRITICAL: {len(critical)} secret(s) detected in tracked files:")
+    for rel_path, line_no, severity, desc in findings:
+        print(f"  [{severity.upper()}] {rel_path}:{line_no} — {desc}")
+
+    print(f"\nRun 'wiki_tool.py audit --mode {mode}' for a full compliance scan.")
+    return len(critical) == 0
+
+
+def cmd_audit(args=None):
+    """Full security + wiki compliance scan.
+
+    Usage: wiki_tool.py audit [--mode public|private]
+
+    Exit codes:
+      0 — clean (no findings)
+      1 — critical findings detected
+      2 — warnings only (no criticals, but issues found)
+    """
+    mode = "private"
+    if args and len(args) >= 2:
+        if args[0] == "--mode":
+            mode = args[1]
+
+    rules = _load_audit_rules()
+    tracked_files = _get_tracked_files()
+
+    if not tracked_files:
+        print("OK: no tracked files to scan.")
+        return True
+
+    has_critical = False
+    has_warning = False
+    all_findings = []
+
+    # --- Security scan (secrets) ---
+    secret_findings = _scan_for_secrets(tracked_files, rules)
+    if secret_findings:
+        for rel_path, line_no, severity, desc in secret_findings:
+            if severity == "critical":
+                has_critical = True
+            all_findings.append(("security", rel_path, line_no,
+                                 severity.upper(), desc))
+
+    # --- Local path scan (public mode only) ---
+    if mode == "public":
+        path_findings = _scan_for_local_paths(tracked_files, rules)
+        if path_findings:
+            has_warning = True
+            for rel_path, line_no, pat in path_findings:
+                all_findings.append(("local_paths", rel_path, line_no,
+                                     "WARNING",
+                                     f"Local path pattern: {pat}"))
+
+    # --- Wiki compliance checks ---
+    wiki_checks = rules.get("wiki_checks", {})
+
+    # Broken wikilinks: find all [[...]] references that don't resolve
+    if wiki_checks.get("broken_wikilinks", True):
+        wikilink_findings = _check_broken_wikilinks(tracked_files)
+        if wikilink_findings:
+            has_warning = True
+            for rel_path, line_no, target in wikilink_findings:
+                all_findings.append(("broken_wikilinks", rel_path, line_no,
+                                     "WARNING",
+                                     f"Broken wikilink: [[{target}]] not found on disk"))
+
+    # Orphaned notes: wiki notes with no incoming backlinks and empty body
+    if wiki_checks.get("orphaned_notes", True):
+        orphan_findings = _check_orphaned_notes()
+        if orphan_findings:
+            has_warning = True
+            for rel_path in orphan_findings:
+                all_findings.append(("orphaned_notes", rel_path, 0,
+                                     "WARNING",
+                                     f"Orphaned note: no incoming backlinks and empty body"))
+
+    # Source coverage gaps from manifest
+    if wiki_checks.get("source_coverage_gaps", True):
+        gap_findings = _check_source_coverage_gaps()
+        if gap_findings:
+            has_warning = True
+            for rel_path in gap_findings:
+                all_findings.append(("coverage_gaps", rel_path, 0,
+                                     "WARNING",
+                                     f"Source without wiki coverage (no covered_by entry)"))
+
+    # --- Report ---
+    if not all_findings:
+        print("OK: no issues found.")
+        return True
+
+    critical_count = sum(1 for f in all_findings if f[4] == "CRITICAL")
+    warning_count = sum(1 for f in all_findings if f[4] != "CRITICAL")
+
+    print(f"Audit findings: {critical_count} critical, {warning_count} warning(s)")
+
+    for category, rel_path, line_no, severity, desc in all_findings:
+        if line_no > 0:
+            print(f"  [{severity}] ({category}) {rel_path}:{line_no} — {desc}")
+        else:
+            print(f"  [{severity}] ({category}) {rel_path} — {desc}")
+
+    if has_critical:
+        print(f"\nFAIL: {critical_count} critical finding(s) — blocks push.")
+        return False
+    elif has_warning:
+        print(f"\nWARN: {warning_count} warning(s) — review recommended.")
+        return True  # Warnings don't block
+    else:
+        print("\nOK: warnings only.")
+        return True
+
+
+def _check_broken_wikilinks(tracked_files):
+    """Find [[...]] references in tracked files that don't resolve to existing files.
+
+    Skips files listed in WIKILINK_SKIP_FILES (docstrings, templates,
+scaffold docs) since their wikilinks are placeholders, not real references.
+    """
+    findings = []
+
+    for rel_path in tracked_files:
+        # Skip individual files by name
+        if os.path.basename(rel_path) in WIKILINK_SKIP_FILES or rel_path in WIKILINK_SKIP_FILES:
+            continue
+        # Skip files inside known doc/template directories
+        skip = False
+        for sd in WIKILINK_SKIP_DIRS:
+            if rel_path.startswith(sd + "/") or rel_path == sd:
+                skip = True
+                break
+        if skip:
+            continue
+        # Skip auto-generated index files (title-cased wikilinks resolve fine in Obsidian)
+        if WIKILINK_SKIP_INDEX and rel_path.endswith("/index.md"):
+            continue
+        full_path = os.path.join(REPO_ROOT, rel_path)
+        if not os.path.isfile(full_path):
+            continue
+
+        try:
+            with open(full_path, "r", encoding="utf-8", errors="replace") as f:
+                lines = f.readlines()
+        except (IOError, OSError):
+            continue
+
+        for line_no, line in enumerate(lines, start=1):
+            # Match [[...]] wikilinks but not frontmatter (--- blocks)
+            if line.strip().startswith("---"):
+                continue
+            matches = _re.findall(r'\[\[([^\]]+)\]\]', line)
+            for target in matches:
+                # Skip external links and special wikilinks
+                if ":" in target or target.startswith("/"):
+                    continue
+                # Resolve relative to repo root (wikilinks are typically relative)
+                target_path = os.path.normpath(os.path.join(
+                    REPO_ROOT, target
+                ))
+                if not os.path.isfile(target_path):
+                    findings.append((rel_path, line_no,
+                                     target.replace("[[", "").replace("]]", "")))
+
+    return findings
+
+
+def _check_orphaned_notes():
+    """Find wiki notes with no incoming backlinks and empty body."""
+    findings = []
+
+    # Collect all wiki folders
+    wiki_folders = [
+        os.path.join(REPO_ROOT, "Wiki", d)
+        for d in ("Topics", "Concepts", "Entities", "Projects")
+    ]
+
+    all_notes = []
+    for folder in wiki_folders:
+        if not os.path.isdir(folder):
+            continue
+        for fname in sorted(os.listdir(folder)):
+            if not fname.endswith(".md"):
+                continue
+            all_notes.append(os.path.join(folder, fname))
+
+    if not all_notes:
+        return findings
+
+    # Build backlink map: for each note, count how many other notes reference it
+    incoming_count = {os.path.basename(n).replace(".md", ""): 0
+                      for n in all_notes}
+    basename_to_path = {os.path.basename(n): n for n in all_notes}
+
+    # Scan all tracked files for [[NoteName]] references to wiki notes
+    for rel_path in _get_tracked_files():
+        full_path = os.path.join(REPO_ROOT, rel_path)
+        if not os.path.isfile(full_path):
+            continue
+        try:
+            with open(full_path, "r", encoding="utf-8", errors="replace") as f:
+                content = f.read()
+            matches = _re.findall(r'\[\[(.*?)\]\]', content)
+            for target in matches:
+                clean = _re.sub(r'^\[+|\]+$', '', target).strip()
+                if clean in incoming_count:
+                    incoming_count[clean] += 1
+        except (IOError, OSError):
+            continue
+
+    # Check for orphans: no incoming links AND empty body
+    for note_path in all_notes:
+        name = os.path.basename(note_path).replace(".md", "")
+        if incoming_count.get(name, 0) == 0:
+            try:
+                with open(note_path, "r", encoding="utf-8") as f:
+                    _, body = parse_frontmatter(f.read())
+                if not body.strip():
+                    findings.append(
+                        os.path.relpath(note_path, REPO_ROOT)
+                    )
+            except (IOError, OSError):
+                pass
+
+    return findings
+
+
+def _check_source_coverage_gaps():
+    """Find sources in manifest that have no covered_by entries."""
+    findings = []
+
+    if not os.path.isfile(MANIFEST_PATH):
+        return findings
+
+    try:
+        with open(MANIFEST_PATH, "r", encoding="utf-8") as f:
+            lines = f.readlines()
+    except (IOError, OSError):
+        return findings
+
+    for line in lines:
+        line = line.strip()
+        if not line or line.startswith("#"):
+            continue
+        try:
+            entry = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+
+        # Skip unprocessed sources (they're expected to have no coverage)
+        if entry.get("status") == "unprocessed":
+            continue
+
+        covered_by = entry.get("covered_by", [])
+        if not isinstance(covered_by, list) or len(covered_by) == 0:
+            source_path = entry.get("path", "unknown")
+            findings.append(source_path)
+
+    return findings
+
+
+# ---------------------------------------------------------------------------
 # Main dispatch
 # ---------------------------------------------------------------------------
 
@@ -1265,6 +1763,9 @@ COMMANDS = {
     "source-delta": cmd_source_delta,
     "search-catalog": cmd_search_catalog,
     "log": cmd_log,
+    # Security / audit
+    "security-scan": cmd_security_scan,
+    "audit": cmd_audit,
 }
 
 
