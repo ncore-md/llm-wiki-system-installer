@@ -29,23 +29,35 @@ This skill is **vault-agnostic**. It works with any Obsidian vault that contains
 **FIRST ACTION: Before performing ANY step, identify which vault to operate on.**
 
 1. **If the user explicitly named a vault** (e.g., "audit Core", `/llm-wiki-audit Core`), use that name directly.
+
 2. **Otherwise, use the list from Pre-flight Check** (already ran `wiki_shared.py vaults`). Present it and ask: "Available vaults (from project config): [list]. Which one do you want to audit?"
+
 3. **Validate** — confirm the selected vault is in the list from Pre-flight Check.
 
+4. **How to find the wiki root:** Once you have a vault name from Vault Selection above, use project config or auto-detect:
    - The wiki root is the directory containing `.llm-wiki-config/config.json` (usually a parent of the vault)
    - Use `wiki_shared.py resolve-path <vault-name>` to find it:
      ```bash
      cd <wiki-root> && python3 scripts/wiki_shared.py resolve-path Core
      ```
 
+5. **Once identified, use that exact vault name for every `obsidian` command.** Never guess or change the vault mid-operation.
 
 6. **The `<wiki-root>` placeholder** in all subsequent commands refers to the directory containing `.llm-wiki-config/config.json`, NOT the vault's root.
 
-   - The wiki root is the directory containing `.llm-wiki-config/config.json` (usually a parent of the vault)
-   - Use `wiki_shared.py resolve-path <vault-name>` to find it:
-     ```bash
-     cd <wiki-root> && python3 scripts/wiki_shared.py resolve-path Core
-     ```
+## Vault Isolation Rule (Required Before Moving to Next Vault)
 
+After processing each vault, CLEAR ALL config-derived variables before moving to the next.
+Never reuse a variable from a previous vault without re-read verification.
 
-9. **The `<wiki-root>` placeholder** in all subsequent commands refers to the directory containing `.llm-wiki-config/config.json`, NOT the vault's root.
+**Variables to clear:** `RAW_PATH`, `WIKI_FOLDER`, `TEMPLATES_DIR`, `TAG_ROUTING`,
+`__WIKI_DIR__`, `__RAW_PATHS__`, topic title lists, catalog search results.
+
+**Before processing the next vault:**
+1. Re-read config using `wiki_shared.py config --force` (disregard cached values)
+2. Re-resolve `wiki_root` using `wiki_shared.py resolve-path <vault-name>`
+3. Re-collect topic titles from the NEW vault's `catalog.jsonl` (do not reuse old list)
+4. Re-scan raw paths for the NEW vault's `raw_paths` (do not reuse old scan)
+
+**Verification:** Before writing any note, confirm the target path exists within
+the current vault's `wiki_root`. If a path does not resolve, abort and report — do NOT guess.

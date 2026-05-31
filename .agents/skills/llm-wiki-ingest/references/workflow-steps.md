@@ -21,17 +21,47 @@
 | C9 | **On-disk filename match** — verify frontmatter source paths match actual filenames on disk (especially for apostrophes, curly quotes) | `ls <RAW_PATH>/ | grep <keyword>` — compare against frontmatter |
 | C0 | **Read-back source body** — after cleaning, explicitly read back the cleaned file and verify NO timestamp patterns (`**X:XX** ·`, `HH:MM:SS - Title`), promo lines, or image embeds remain | Read first 50 and last 50 lines of the cleaned source file. If any timestamp/promo pattern found, clean again before proceeding to Step 2 |
 | C10 | **Pre-commit lint** — run `lint` + `source-lint` explicitly before asking user to commit | `python3 scripts/wiki_tool.py lint && python3 scripts/wiki_tool.py source-lint` |
+| C12 | **Cross-reference isolation** — verify all wikilinks in newly written notes resolve within the target vault's wiki_root | `python3 << 'PYEOF'
+import json, os, glob
+wiki_root = "__WIKI_ROOT__"  # current vault's wiki root from config
+errors = []
+for note_file in glob.glob(os.path.join(wiki_root, "Wiki", "**", "*.md"), recursive=True):
+    with open(note_file) as f:
+        content = f.read()
+    import re
+    for match in re.finditer(r'\[\[([^\]]+)\]\]', content):
+        link = match.group(1)
+        if '/' in link and not link.startswith('http'):
+            full_path = os.path.join(wiki_root, link)
+            if not os.path.exists(full_path):
+                errors.append(f"{note_file}: broken link [[{link}]]")
+if errors:
+    print("C12 FAIL:")
+    for e in errors[:50]:  # cap output
+        print(f"  {e}")
+else:
+    print("C12 PASS")
+PYEOF` | **Efficient mode (default):** Run once after all Steps 0–9 complete for the vault. Scan all notes in Wiki/ directory — if any wikilink does not resolve within this vault's wiki_root, FIX before proceeding. **Strict mode (optional):** Run after every individual note write. Enable via `defaults.isolation_mode: "strict"` in config.json (default is `"efficient"`) |
 
 **Hard rule:** If C0 triggers (timestamp/promo patterns remain) or C4 triggers (empty sources), do NOT proceed to Step 2. Fix immediately, re-verify, then continue.
 
 ### Step 0 - Check for Pending Sources
 **Action:** Before asking the user for a source, discover vault config and check each validated vault's raw paths for files that need processing.
 
+**Per-Vault Variable Re-Collection:** At the beginning of Step 0 for each vault, explicitly re-collect ALL variables from that vault's config. Do NOT reuse values from a previous vault.
+
 **Config Discovery:** Before scanning, discover the vault's config to get its permissions and raw paths:
 ```bash
 cd <wiki-root> && python3 scripts/wiki_shared.py config --force 2>&1
 ```
 This returns JSON with `permissions` (e.g., `["read", "write", "ingest"]`) and `raw_paths` (e.g., `["Raw/Source", "Raw/Sources"]`). If the vault has only `"read"` permission, skip all write/ingest operations — report "Vault is read-only (no ingest/write permission)" and move to the next vault.
+
+**Per-vault re-collection (after config discovery, before any other Step 0 action):**
+1. **Re-resolve wiki root:** `cd <wiki-root> && python3 scripts/wiki_shared.py resolve-path "<vault-name>" 2>&1`
+2. **Re-collect topic titles** from THIS vault's `catalog.jsonl` (do not reuse old list)
+3. **Re-scan raw paths** from THIS vault's `raw_paths` (do not reuse old scan)
+
+**Hard rule:** If `__WIKI_DIR__` or `__RAW_PATHS__` were populated from a previous vault's config, they are INVALID for the current vault. Always re-collect after switching vaults.
 
 **Load Vault Rules:** Parse structured rules from AGENTS.md (the `---checklist---` section) to get vault-specific constraints:
 ```bash
