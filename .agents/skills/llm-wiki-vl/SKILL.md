@@ -1,9 +1,6 @@
 ---
 name: llm-wiki-vl
-description: Analyze images to produce wiki notes via subagent. Use when image sources need processing — screenshots, diagrams, checklists.
-compatibility: Vision-capable model (gemini-2.5-pro or equivalent), read tool access
-metadata:
-  category: wiki-vision
+description: Analyze images and produce clean Obsidian wiki notes. Use when a subagent needs vision capabilities to extract structured content from images (screenshots, diagrams, checklists) and convert it into properly formatted wiki notes with YAML frontmatter.
 ---
 
 # LLM Wiki — Vision Language Skill
@@ -26,6 +23,15 @@ The parent agent will provide:
 ## Output Format
 Produce one or more wiki notes separated by a single line: `---NOTE_BOUNDARY---`
 
+**Metadata lines (placed before each note, outside the note boundary):**
+```
+---SOURCE_NOTE: <source-file-path>
+---IMAGE_INDEX: <index/total or N/A>
+---CONSOLIDATION_CONFIDENCE: high|medium|low
+---CONSOLIDATION_REASON: <brief explanation>
+```
+These metadata lines sit above the `---NOTE_BOUNDARY---` separator. The orchestrator strips them before writing notes to disk.
+
 Each note must follow this exact structure:
 
 ```markdown
@@ -45,7 +51,7 @@ source_count: N
 # Title
 
 ## Key Points
-- bullet N (concise, capturing all essential information)
+- bullet 1 (max 5, concise)
 - bullet 2
 - bullet 3
 
@@ -75,18 +81,22 @@ source_count: N
 5. **topics field must have ≥1 wikilink** — Never leave empty or null. Use exact titles from the provided topic list.
 6. **sources must use real filenames** — Never hallucinate or guess image filenames. Use only the provided list.
 7. **One concept per note** — Each note covers exactly one discrete idea or topic.
+8. **Vault-scoped references only** — Every wikilink in topics: and sources: MUST resolve to a file within the subagent's declared target vault. The input data (topic titles, image paths) already comes from a single vault's context — do not introduce cross-vault references. If you encounter an ambiguous topic title, use the exact title as provided; do not attempt to disambiguate by adding vault prefixes.
 
 ## Analysis Process (Internal Only)
 1. Read the image using your `read` tool — see it directly, no encoding needed.
 2. Extract all visible text, labels, structure, and visual elements.
 3. Identify wiki-worthy concepts: what notes should be created? What do users need to know about this content?
-4. If image contains multiple distinct concepts/tools/features, produce separate notes for each (one per concept). Use ---NOTE_BOUNDARY--- to separate them.
-5. Match concepts to existing topic notes (use the provided list).
+4. Match concepts to existing topic notes (use the provided list).
 5. Use real image filenames from the provided list for `sources`.
 6. Write clean notes following the Output Format exactly.
 
 ## Examples of Good Output
 ```markdown
+---SOURCE_NOTE: Raw/Sources/screenshot_1.png
+---IMAGE_INDEX: 1/3
+---CONSOLIDATION_CONFIDENCE: high
+---CONSOLIDATION_REASON: Clear diagram explaining frontmatter validation rules
 ---
 tags:
   - concept

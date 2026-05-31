@@ -9,7 +9,7 @@
 
 | # | Check | Command / Action |
 |---|-------|------------------|
-| C1 | **Read config for ALL paths** before writing anything | `python3 scripts/wiki_shared.py config --force` — store values in variables (`RAW_PATH`, `WIKI_FOLDER`, etc.) |
+| C1 | **Read config for ALL paths** before writing anything | `python3 scripts/wiki_shared.py config --force` — store values in variables (`RAW_PATH`, `WIKI_FOLDER`, etc.). Config defaults and tag routing are cached in Schema/.llm-wiki-cache.json — auto-invalidated when AGENTS.md changes (file hash comparison). Templates are cached in memory via `wiki_shared.py get_cached_template()` (function-level cache, safe for CLI usage) |
 | C2 | **Pre-write YAML verification** — confirm frontmatter has real values before calling write tool | Visually inspect: `sources:` must have entries (quoted wikilinks), `topics:` must have ≥1 plain text topic title; `tags:` must be array |
 | C3 | **Post-write re-read** — verify file has both frontmatter AND body content after every write |
 | C11 | **Source body integrity** — verify cleaned source preserved full content (not truncated) | Compare line count before/after cleaning. If body dropped >50% of original lines, RE-DO with in-context editing (no script). |
@@ -20,28 +20,8 @@
 | C8 | **Required sections** — every compiled note must have `## Related` AND `## Sources` in body | `grep -c '^## Related\|^## Sources' <WIKI_FOLDER>/<Note Name>.md — must return count of required sections |
 | C9 | **On-disk filename match** — verify frontmatter source paths match actual filenames on disk (especially for apostrophes, curly quotes) | `ls <RAW_PATH>/ | grep <keyword>` — compare against frontmatter |
 | C0 | **Read-back source body** — after cleaning, explicitly read back the cleaned file and verify NO timestamp patterns (`**X:XX** ·`, `HH:MM:SS - Title`), promo lines, or image embeds remain | Read first 50 and last 50 lines of the cleaned source file. If any timestamp/promo pattern found, clean again before proceeding to Step 2 |
-| C10 | **Pre-commit lint** — run `lint` + `source-lint` explicitly before asking user to commit | `python3 scripts/wiki_tool.py lint && python3 scripts/wiki_tool.py source-lint` |
-| C12 | **Cross-reference isolation** — verify all wikilinks in newly written notes resolve within the target vault's wiki_root | `python3 << 'PYEOF'
-import json, os, glob
-wiki_root = "__WIKI_ROOT__"  # current vault's wiki root from config
-errors = []
-for note_file in glob.glob(os.path.join(wiki_root, "Wiki", "**", "*.md"), recursive=True):
-    with open(note_file) as f:
-        content = f.read()
-    import re
-    for match in re.finditer(r'\[\[([^\]]+)\]\]', content):
-        link = match.group(1)
-        if '/' in link and not link.startswith('http'):
-            full_path = os.path.join(wiki_root, link)
-            if not os.path.exists(full_path):
-                errors.append(f"{note_file}: broken link [[{link}]]")
-if errors:
-    print("C12 FAIL:")
-    for e in errors[:50]:  # cap output
-        print(f"  {e}")
-else:
-    print("C12 PASS")
-PYEOF` | **Efficient mode (default):** Run once after all Steps 0–9 complete for the vault. Scan all notes in Wiki/ directory — if any wikilink does not resolve within this vault's wiki_root, FIX before proceeding. **Strict mode (optional):** Run after every individual note write. Enable via `defaults.isolation_mode: "strict"` in config.json (default is `"efficient"`) |
+| C10 | **Pre-commit validation** — run `build` + `lint` + `source-lint` explicitly before asking user to commit | **Single vault:** `python3 scripts/wiki_tool.py build && python3 scripts/wiki_tool.py lint && python3 scripts/wiki_tool.py source-lint`<br>**Multi-vault:** See Step 6b — use `python3 scripts/wiki_tool_all.py validate-all` for parallel per-vault validation (90s timeout each) |
+| C12 | **Cross-reference isolation** — verify all wikilinks in newly written notes resolve within the target vault's wiki_root | `python3 << 'PYEOF'\nimport json, os, glob\nwiki_root = "__WIKI_ROOT__"  # current vault's wiki root from config\nerrors = []\nfor note_file in glob.glob(os.path.join(wiki_root, "Wiki", "**", "*.md"), recursive=True):\n    with open(note_file) as f:\n        content = f.read()\n    import re\n    for match in re.finditer(r'\\[\\[([^\\]]+)\\]\\]', content):\n        link = match.group(1)\n        if '/' in link and not link.startswith('http'):\n            full_path = os.path.join(wiki_root, link)\n            if not os.path.exists(full_path):\n                errors.append(f"{note_file}: broken link [[{link}]]")\nif errors:\n    print("C12 FAIL:")\n    for e in errors[:50]:  # cap output\n        print(f"  {e}")\nelse:\n    print("C12 PASS")\nPYEOF` | **Efficient mode (default):** Run once after all Steps 0–9 complete for the vault. Scan all notes in Wiki/ directory — if any wikilink does not resolve within this vault's wiki_root, FIX before proceeding. **Strict mode (optional):** Run after every individual note write. Enable via `defaults.isolation_mode: "strict"` in config.json (default is `"efficient"`) |
 
 **Hard rule:** If C0 triggers (timestamp/promo patterns remain) or C4 triggers (empty sources), do NOT proceed to Step 2. Fix immediately, re-verify, then continue.
 
@@ -196,6 +176,17 @@ python3 scripts/wiki_shared.py models note_generation
 
 **Model warm-reuse (subagent path only):** The cache flag `defaults.agent_has_vision: True` plus the task override for `image_ingest` keep the ~20GB VL model loaded between subagent calls. After one initial cold start (60-90s), subsequent calls reuse the warm model (~10-20s). Spawn each subagent as a separate call — no batching. If you are analyzing images directly, this warm-reuse does not apply.
 
+**Hybrid streaming VL processing (multiple images):**
+1. Model warm-reuse: `defaults.agent_has_vision: True` + task override keep VL model loaded between calls
+2. Spawn first batch of VL subagents with `async: true` (up to concurrency limit, default 4)
+3. As each result arrives: process immediately, spawn next queued image to fill open slot
+4. Text source processing (Steps 1-9) runs in parallel with VL image processing — independent work streams
+5. After all VL outputs are collected, proceed to consolidation step (see below)
+6. Consolidation decision document produced → orchestrator writes notes based on consolidation output
+7. Continue with Steps 1-9 (text source processing)
+
+**Parallel execution safety rules:** Never write to another vault's wiki_root during parallel processing. Each VL subagent must be given its own `wiki_root` and `raw_paths`. Catalog search results are per-vault; do not mix entries from different vaults. If any parallel operation fails, report failures per-vault and continue with successful ones.
+
 **Multi-note extraction:** If the image contains multiple distinct concepts, tools, or features, produce separate notes for each. Use `---NOTE_BOUNDARY---` to separate them.
 
 **Pre-step: Collect existing topic titles and real image filenames** (so the subagent can populate `topics` with real wikilinks and use correct source paths):
@@ -289,6 +280,34 @@ subagent({
 **Cold-start warning (subagent path only):** The subagent's VL model load takes ~60-90s (cold start on local engine). The subagent itself may take 30–120s more for inference + note generation. Use `async: true` if you want to continue other work while waiting.
 
 **Verbose output handling (subagent path only):** If the subagent's output in `$VL_OUTPUT_FILE` contains verbose reasoning or preamble text instead of clean `---NOTE_BOUNDARY---` separated notes, extract the note drafts from within (they appear as structured markdown blocks with `---YAML---` frontmatter) or rewrite them manually based on the VL analysis. The `llm-wiki-vl` skill enforces clean output but cannot guarantee it for all VL models.
+
+### Consolidation Step (After VL Batch, Before Steps 1-9)
+**Action:** Evaluate VL subagent output alongside the orchestrator's source mapping to produce a structured decision document for note creation, update, or merge.
+
+**Position:** This step runs AFTER VL batch completion and BEFORE text source processing (Steps 1-9). The orchestrator evaluates all collected VL outputs, then executes note writes based on the consolidation decision.
+
+**Input:**
+- `$VL_OUTPUT_FILE`: Path to VL subagent's output (notes separated by `---NOTE_BOUNDARY---`, each with metadata lines)
+- `$SOURCE_MAPPING`: JSON describing source-to-vault relationships (from orchestrator context)
+
+**Process:**
+1. Read `$VL_OUTPUT_FILE` and parse metadata lines before each `---NOTE_BOUNDARY---`
+2. Apply consolidation rules (R1-R8 from llm-wiki-consolidate skill):
+   - R1: Same-source sequential images → MERGE into single note
+   - R2: Standalone screenshot with no related images → KEEP as standalone note  
+   - R3/R4: Cross-topic overlap → FLAG for human review (low confidence) or PARTIAL MERGE (medium)
+   - R5: Existing topic already covers concept → UPDATE existing note instead of create
+   - R6: Missing metadata fields → use sensible defaults (consolidation confidence = medium)
+   - R7: Low-quality VL output → DON'T pollute merged notes
+3. Produce JSON decision document at `$CONSOLIDATE_OUTPUT_FILE` with:
+   - `notes_written`: actions to take (create/update paths, tags, topics)
+   - `ambiguous_cases`: items requiring human review
+   - `summary`: counts of created, updated, ambiguous, rejected
+4. Orchestrator reviews decision document and executes writes via `obsidian_write`/`obsidian_append`
+5. Orchestrator resolves any ambiguous cases manually
+6. Continue with Steps 1-9 (text source processing)
+
+**Note:** The consolidate skill does NOT write notes to disk — it produces only the decision document. The orchestrator executes all writes based on this output.
 
 ### Step 1 — Clean & Store Raw Source
 **Action:** Write cleaned Markdown into the vault's configured raw paths (from config `raw_paths`) using the native tools. Use the first writable path in the list (e.g., `Raw/Sources/`). **Skip this step for image files** — they bypass cleaning entirely and go from VL analysis (Step 0) directly to Steps 2–9.
@@ -511,7 +530,7 @@ If you ever see escaped quotes (`\"`) in the YAML that don't match the actual fi
 ### Step 5 — (Integrated into Steps 1 & 4)
 Source links are added as part of note creation/updates. The `sources` array in frontmatter contains wikilinks to Raw sources, and `source_count` must equal the number of entries.
 
-### Step 6 — Validate with Wiki Tool
+### Step 6 — Validate with Wiki Tool (Single Vault)
 **Action:** Run build, lint, and source-lint to enforce the wiki's schema contract.
 
 ```bash
@@ -523,6 +542,28 @@ python3 scripts/wiki_tool.py build && python3 scripts/wiki_tool.py lint && pytho
 - **source-lint** — validates raw source frontmatter (title, reference/source present, created date format) and coverage state (processed sources must have `covered_by` entries).
 
 If ANY check fails, fix the issues and repeat. This is your quality gate — Python scripts enforce rules Obsidian doesn't know about (source resolution, schema compliance). Do NOT skip `source-lint` — it catches issues that lint doesn't (raw source frontmatter, coverage state).
+
+### Step 6b — Post-Ingest Parallel Validation (Multi-Vault)
+**Action:** After all vaults complete Steps 0–9 individually, run `build + lint + source-lint` in parallel across all vaults using the cross-vault validation script.
+
+**Rationale:** When processing 3+ vaults sequentially (same session), running validation in parallel reduces total time from `sum(validation_time)` to `max(validation_time)`. Each vault's validation is independent (different wiki_root, no shared state).
+
+**Post-ingest validation:** After Steps 0-9 complete for all selected vaults, run `python3 scripts/wiki_tool_all.py validate-all` on each vault in parallel. Report failures per-vault independently.
+
+**Command:**
+```bash
+python3 scripts/wiki_tool_all.py validate-all [--vault A,B,C]
+```
+This discovers all vaults from project config, runs `build + lint + source-lint` per vault with a 90-second timeout each, and reports consolidated results.
+
+**Result handling:**
+- **All vaults pass:** Proceed to Step 9 (commit each individually)
+- **One or more fail:** The script reports which vaults failed and why. User decides:
+  - Fix the failing vault(s) and re-validate
+  - Commit passing vaults now, defer failing ones (use `--no-verify` on pre-commit hook)
+  - Abort all and fix everything before any commit
+
+**Permission-aware:** The script checks vault permissions from config. Vaults with `read` permission can run lint/source-lint but NOT build (write operation). Read-only vaults (`["read"]`) are validated for schema quality but skipped for build.
 
 ### Step 7 — Update Source Manifest
 **Action:** Scan raw sources and update the manifest with coverage state.
@@ -545,10 +586,27 @@ python3 scripts/wiki_tool.py log --title "<short title>" --details "<what was af
 Only log if meaningful changes were made — not for every minor update. The entry should describe what files were affected and why.
 
 ### Step 9 — Commit (Git)
-**Action:** Use git to commit all changes. The pre-commit hook automatically runs `doctor + build + lint` as a final safety gate.
+**Action:** Use git to commit all changes. The pre-commit hook automatically runs `build + lint + source-lint` as a final safety gate.
 
 ```bash
 git add -A && git commit -m "<message>"
 ```
 
 Git is outside Obsidian's scope — obsidian-cli can't touch it. The pre-commit hook provides the last line of defense before changes land in history.
+
+**Multi-vault workflow:** When processing multiple vaults (each a separate git repo):
+
+1. **Steps 0–9 per vault:** Each vault processes independently in its own wiki_root
+2. **Step 6b (parallel validation):** After all vaults complete Steps 0–9, run `build + lint + source-lint` in parallel across all vaults (see Step 6b above)
+3. **Commit:** For each passing vault, commit individually:
+```bash
+cd $VAULT_A_DIR && git add -A && git commit -m "<message>"
+cd $VAULT_B_DIR && git add -A && git commit -m "<message>"
+```
+
+Each vault's pre-commit hook runs independently for its own repo. The parallel validation in Step 6b gives you a consolidated report before any commits; the pre-commit hook is a final safety net against changes made between Step 6b and the actual commit.
+
+**Commit strategy with mixed results:** If some vaults pass validation but others fail:
+- **Option A (recommended):** Commit passing vaults immediately, defer failing ones. Fix failing vaults and re-validate in the next session.
+- **Option B (strict):** Abort all commits. Fix ALL vaults before any commit lands.
+- **Option C (force):** Use `git commit --no-verify` on failing vaults to bypass pre-commit hook (not recommended — only use if you're confident the issues are minor).

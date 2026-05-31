@@ -7,7 +7,7 @@
    cd <wiki-root> && python3 scripts/wiki_shared.py vaults 2>&1
    ```
 
-2. **If output lists vaults** (e.g., `Core [read,write,...]`): proceed to Vault Selection.
+2. **If output lists vaults** (e.g., `<vault-name> [read,write,...]`): proceed to Vault Selection.
 
 3. **If output is empty or says "No project config":**
    - Tell the user: "Config not found or has no vaults declared (.llm-wiki-config/config.json). Without it, wiki operations can't proceed."
@@ -22,13 +22,36 @@
      ```
    - **If user declines:** stop and explain wiki operations require a project config.
 
+## Cross-Vault Scanning (Optional)
+
+For org-wide compliance, run `security-scan-all` across all vaults via the cross-vault script:
+```bash
+cd <wiki-root> && python3 scripts/wiki_tool_all.py security-scan-all
+```
+This scans every vault declared in project config and returns consolidated results. Use `--vault A,B` to target specific vaults.
+
+Per-vault audit rules can be customized in `.llm-wiki-config/config.json`:
+```json
+{
+  "vaults": {
+    "<vault-name>": { ... },
+    "<sensitive-vault>": {
+      ...
+      "audit_rules_path": ".llm-wiki-config/strict-audit-rules.json"  // per-vault override (default: null = uses shared rules)
+    }
+  }
+}
+```
+
+**Note:** `wiki_tool.py` is self-contained per-vault (no cross-vault awareness). Cross-vault operations are handled by `wiki_tool_all.py` which reads the shared project config and spawns subprocesses in each vault's context.
+
 ## Vault Selection (Required Before Any Operation)
 
 This skill is **vault-agnostic**. It works with any Obsidian vault that contains an LLM Wiki structure.
 
 **FIRST ACTION: Before performing ANY step, identify which vault to operate on.**
 
-1. **If the user explicitly named a vault** (e.g., "audit Core", `/llm-wiki-audit Core`), use that name directly.
+1. **If the user explicitly named a vault** (e.g., "audit <vault-name>", `/llm-wiki-audit <vault-name>`), use that name directly.
 
 2. **Otherwise, use the list from Pre-flight Check** (already ran `wiki_shared.py vaults`). Present it and ask: "Available vaults (from project config): [list]. Which one do you want to audit?"
 
@@ -38,7 +61,7 @@ This skill is **vault-agnostic**. It works with any Obsidian vault that contains
    - The wiki root is the directory containing `.llm-wiki-config/config.json` (usually a parent of the vault)
    - Use `wiki_shared.py resolve-path <vault-name>` to find it:
      ```bash
-     cd <wiki-root> && python3 scripts/wiki_shared.py resolve-path Core
+     cd <wiki-root> && python3 scripts/wiki_shared.py resolve-path <vault-name>
      ```
 
 5. **Once identified, use that exact vault name for every `obsidian` command.** Never guess or change the vault mid-operation.
@@ -63,3 +86,6 @@ variables set for one vault must not be reused when processing another.
 
 **Verification:** Before writing any note, confirm the target path exists within
 the current vault's `wiki_root`. If a path does not resolve, abort and report — do NOT guess.
+
+## Vault Isolation Rule (All Skills)
+When the orchestrator processes multiple vaults, `reset_vault_state()` is called between each vault. This clears all cached config-derived state (templates, search index, discovered paths). Always call `reset_vault_state()` after completing Steps 0-9 for a vault and before starting the next.

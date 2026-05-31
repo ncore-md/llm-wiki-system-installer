@@ -1205,8 +1205,82 @@ def cmd_source_delta(args=None):
     return True
 
 
+# ---------------------------------------------------------------------------
+# Catalog Search — Inverted Index (built once per session, O(1) term lookup)
+# ---------------------------------------------------------------------------
+
+_catalog_index = None  # {term: set(entry_keys)} — built lazily on first search
+_catalog_entries = []  # list of catalog entries, indexed by entry_key
+
+def _build_search_index():
+    """Build an in-memory inverted index from catalog.jsonl for O(1) term lookup.
+
+    Returns (index, entries) where index maps search terms to entry keys,
+    and entries is a dict of key→entry for lookup.\ Built once per session
+    (cached in _catalog_index/_catalog_entries).
+
+    Rebuilds if catalog.jsonl has changed since last build (file hash comparison).
+    """
+    global _catalog_index, _catalog_entries
+    import hashlib
+
+    # Check if index is already built and catalog hasn't changed
+    if _catalog_index is not None:
+        try:
+            with open(CATALOG_PATH, "rb") as f:
+                current_hash = hashlib.md5(f.read()).hexdigest()
+            # Hash stored with index
+            if getattr(_catalog_index, "_hash", None) == current_hash:
+                return _catalog_index._index, {k: e for k, e in getattr(_catalog_index, "_entries", {}).items()}
+        except (FileNotFoundError, AttributeError):
+            pass
+
+    # Build new index from catalog.jsonl
+    import re as _re_search  # rename to avoid conflict with module-level `as`
+    index = {}  # {term: set(entry_keys)}
+    entries = {}
+
+    if not os.path.isfile(CATALOG_PATH):
+        return index, entries
+
+    with open(CATALOG_PATH, "r", encoding="utf-8") as f:
+        for line in f:
+            line = line.strip()
+            if not line:
+                continue
+            entry = json.loads(line)
+            # Create a unique key for this entry (use title + tag as composite)
+            title = entry.get("title", "")
+            tag = entry.get("tag", "")
+            key = f"{tag}:{title}"
+            entries[key] = entry
+
+            # Index searchable fields: title, topics, tag
+            searchable_fields = [
+                entry.get("title", ""),
+                entry.get("tag", ""),
+            ] + list(entry.get("topics", []))
+
+            for field in searchable_fields:
+                # Extract word tokens from the field
+                terms = set(_re_search.findall(r'\w+', field.lower()))
+                for term in terms:
+                    if term not in index:
+                        index[term] = set()
+                    index[term].add(key)
+
+    # Store hash for future invalidation checks
+    try:
+        with open(CATALOG_PATH, "rb") as f:
+            _catalog_index = type("_IndexCache", (), {"_index": index, "_entries": entries, "_hash": hashlib.md5(open(CATALOG_PATH, "rb").read()).hexdigest()})()
+    except FileNotFoundError:
+        _catalog_index = type("_IndexCache", (), {"_index": index, "_entries": entries})()
+    _catalog_entries = entries
+
+    return index, entries
+
 def cmd_search_catalog(args):
-    """Search compiled Wiki notes through the catalog."""
+    """Search compiled Wiki notes through the catalog using inverted index (O(1) term lookup)."""
     query_idx = args.index("--query") if "--query" in args else -1
     if query_idx < 0 or query_idx + 1 >= len(args):
         print("ERROR: usage: wiki_tool.py search-catalog --query \"text\"")
@@ -1217,25 +1291,37 @@ def cmd_search_catalog(args):
     # Split into individual search terms for better recall
     query_terms = set(query.split())
 
-    results = []
-    if os.path.isfile(CATALOG_PATH):
-        with open(CATALOG_PATH, "r", encoding="utf-8") as f:
-            for line in f:
-                line = line.strip()
-                if not line:
-                    continue
-                entry = json.loads(line)
-                # Search title, topics, tags, and sources fields
-                searchable = " ".join([
-                    entry.get("title", ""),
-                    " ".join(entry.get("topics", [])),
-                    entry.get("tag", ""),
-                    " ".join(entry.get("sources", [])),
-                ]).lower()
+    # Use inverted index if catalog is large enough (threshold: ~200 entries)
+    import re as _re_search  # avoid conflict with module-level alias
+    index, entries = _build_search_index()
+    entry_count = len(entries)
 
-                # Match if any query term appears in searchable fields (not just exact phrase)
-                if any(term in searchable for term in query_terms):
-                    results.append(entry)
+    if index and entry_count >= 50:  # Use index for catalogs with 50+ entries
+        # Find matching entry keys via O(1) term lookup
+        matched_keys = set()
+        for term in query_terms:
+            if term in index:
+                matched_keys.update(index[term])
+        results = [entries[key] for key in sorted(matched_keys)]
+    else:
+        # Fallback to linear scan for small catalogs
+        results = []
+        if os.path.isfile(CATALOG_PATH):
+            with open(CATALOG_PATH, "r", encoding="utf-8") as f:
+                for line in f:
+                    line = line.strip()
+                    if not line:
+                        continue
+                    entry = json.loads(line)
+                    searchable = " ".join([
+                        entry.get("title", ""),
+                        " ".join(entry.get("topics", [])),
+                        entry.get("tag", ""),
+                        " ".join(entry.get("sources", [])),
+                    ]).lower()
+
+                    if any(term in searchable for term in query_terms):
+                        results.append(entry)
 
     print(f"Search '{args[query_idx + 1]}' — {len(results)} results:")
     for entry in results:
@@ -1747,6 +1833,10 @@ def _check_source_coverage_gaps():
 
     return findings
 
+
+# ---------------------------------------------------------------------------
+# Main dispatch
+# ---------------------------------------------------------------------------
 
 # ---------------------------------------------------------------------------
 # Main dispatch

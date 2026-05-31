@@ -1,9 +1,6 @@
 ---
 name: llm-wiki-query
-description: Answer questions using wiki's compiled knowledge. Search catalog first, synthesize from compiled notes. Use when user asks something potentially answerable from Wiki.
-compatibility: Python 3.8+, Chrome DevTools Protocol access, config.json present
-metadata:
-  category: wiki-query
+description: Search and query the Wiki knowledge base to answer user questions from compiled notes.
 ---
 
 ## When to use
@@ -12,10 +9,38 @@ The user asks a question that could be answered from the Wiki knowledge base, or
 ## Prerequisites
 - **Vault must be identified before any operation** — see Vault Selection below.
 
+## Pre-flight Check (Required Before Vault Selection)
+**Before attempting vault selection, verify config is usable.** If it's missing or empty, offer setup.
 
-## Shared Infrastructure
+1. **Check vaults:**
+   ```bash
+   cd <wiki-root> && python3 scripts/wiki_shared.py vaults 2>&1
+   ```
 
-**Pre-flight Check and Vault Selection are handled by the shared infrastructure.** See `references/shared-infra.md` for details.
+2. **If output lists vaults** (e.g., `Core [read,write,...]`): proceed to Vault Selection.
+
+3. **If output is empty or says "No project config":**
+   - Tell the user: "Config not found or has no vaults declared (.llm-wiki-config/config.json). Without it, wiki operations can't proceed."
+   - Ask: "Would you like to run the setup wizard? It will discover your Obsidian vaults and let you assign permissions (read, write, ingest, maintain)."
+   - **If user agrees:** spawn a subagent to run setup:
+     ```javascript
+     subagent({
+       agent: "scout",
+       task: "Run the llm-wiki-setup workflow to create .llm-wiki-config/config.json. Walk up from wiki root, discover vaults via obsidian CLI, guide user through permission selection, write config file.",
+       skill: "llm-wiki-setup"
+     })
+     ```
+   - **If user declines:** stop and explain wiki operations require a project config.
+
+## Vault Selection (Required Before Any Operation)
+This skill is **vault-agnostic**. It works with any Obsidian vault that contains an LLM Wiki structure.
+
+**FIRST ACTION: Before performing ANY step, identify which vault to query.**
+
+1. **If the user explicitly named a wiki** (e.g., "search Core wiki", `/llm-wiki-query Core`), use that name.
+2. **Otherwise, use the list from Pre-flight Check** (already ran `wiki_shared.py vaults`). Present it and ask: "Available vaults (from project config): [list]. Which wiki do you want to search?"
+
+3. **Validate** — confirm the selected vault is in the list from Pre-flight Check.
 
 ## Reference
 - `<wiki-root>/AGENTS.md` — Query Workflow section, Core Rules
@@ -55,18 +80,5 @@ The wiki root is at the path declared in `.llm-wiki-config/config.json` under `w
 - If the catalog returns no results, inform the user that the topic may not be in this wiki yet.
 - Never invent information — only report what is found in the notes or sources.
 
-## Error Handling
-
-- **Vault selection fails** — If `obsidian list-vaults` returns no vaults, run llm-wiki-setup first
-- **Obsidian CLI connection fails** — Verify Obsidian is running. Retry once after 10s, then report
-- **Config missing** — If `.llm-wiki-config/config.json` is absent, run llm-wiki-setup first
-- **Catalog search returns no results** — Inform the user that the topic may not be in the wiki. Suggest adding it via ingest
-- **Note read fails** — If a note cannot be opened (missing, corrupted), skip it and report. Do not fabricate content
-
-## What Not to Do (Anti-Patterns)
-
-- **Do not invent information** — Only report what is found in wiki notes or sources. Never hallucinate answers
-- **Do not skip catalog search** — Always query the catalog first before reading Raw sources directly
-- **Do not read all notes for every query** — Use the catalog to narrow down relevant sources. Reading everything is wasteful and slow
-- **Do not expose raw source content without context** — When citing sources, explain what they contribute to the answer
-- **Do not mix compiled and raw without distinction** — Clearly state whether your answer comes from a compiled note or a Raw source
+## Vault Isolation Reminder
+The query skill reads from one vault only. When the orchestrator processes multiple vaults, always ensure you are querying within the correct vault's wiki_root. Do not cross-reference notes from other vaults.

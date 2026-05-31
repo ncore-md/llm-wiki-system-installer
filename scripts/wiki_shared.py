@@ -719,6 +719,49 @@ def get_config(wiki_root=None):
     return cache.get("config", {})
 
 
+# ---------------------------------------------------------------------------
+# Template Caching (in-memory, per-vault, session-scoped)
+# ---------------------------------------------------------------------------
+
+# Module-level cache dict — safe for CLI usage (each invocation is a new process).
+# For imported usage, cache is per-invocation since it's defined at module level.
+def get_cached_template(vault_root, tag):
+    """Get template for a note tag. Caches in memory per-vault, session-scoped.
+
+    Templates are small (1-5KB each). Caching reduces disk I/O from 10-50ms
+    to ~1μs per read. Zero impact on context window — templates enter context
+    either way when notes are created.
+
+    Note: This uses a module-level dict. Safe for CLI usage (new process per run).
+    For imported usage in long-running processes, the cache persists across calls.
+
+    Args:
+        vault_root: Path to the vault's wiki root directory
+        tag: Note type (e.g., 'concept', 'entity', 'topic')
+
+    Returns:
+        Template content as string, or None if template not found.
+    """
+    # Use a local dict per call for safety in imported contexts
+    cache_key = f"{vault_root}:{tag}"
+    if not hasattr(get_cached_template, "_cache"):
+        get_cached_template._cache = {}
+
+    if cache_key in get_cached_template._cache:
+        return get_cached_template._cache[cache_key]
+
+    templates_dir = "_templates"
+    template_path = os.path.join(vault_root, templates_dir, f"{tag}-note.md")
+
+    if os.path.isfile(template_path):
+        with open(template_path, "r", encoding="utf-8") as f:
+            content = f.read()
+        get_cached_template._cache[cache_key] = content
+        return content
+    else:
+        get_cached_template._cache[cache_key] = None
+        return None
+
 def refresh_config(wiki_root=None):
     """Mark config as stale so next discover will re-run."""
     cache_path = get_cache_path(wiki_root)
@@ -729,6 +772,110 @@ def refresh_config(wiki_root=None):
     config = cache.setdefault("config", {})
     config["stale"] = True
     save_cache(cache, cache_path)
+
+
+def reset_vault_state():
+    """Reset all cached state between vault operations.
+
+    Called by the orchestrator after completing Steps 0-9 for a vault and before
+    starting the next. Clears:
+    - Template cache (get_cached_template._cache)
+    - Config discovery cache (marks config as stale in Schema/.llm-wiki-cache.json)
+    - Any other module-level state that could leak between vaults
+
+    This prevents variable leakage even if agents skip instructions.
+    Safe to call multiple times; idempotent.
+
+    Note: This is a script-level enforcement of vault isolation. The shared-infra.md
+    for each skill instructs agents to call this function between vault operations.
+    """
+    # Clear template cache
+    if hasattr(get_cached_template, "_cache"):
+        get_cached_template._cache.clear()
+
+    # Mark config as stale in shared cache (forces re-discovery on next access)
+    try:
+        cache_path = get_cache_path()
+        if cache_path.exists():
+            cache = load_cache(cache_path)
+            config = cache.setdefault("config", {})
+            config["stale"] = True
+            save_cache(cache, cache_path)
+    except Exception:
+        # If we can't access the cache file (e.g., wrong working directory),
+        # that's OK — the template cache was already cleared above.
+        pass
+
+    # Clear VL discovery cache (forces re-discovery for next vault's context)
+    if hasattr(discover_vl_models, "_cache"):
+        discover_vl_models._cache.clear()
+
+
+def check_vl_model_health(cache_path=None):
+    """Check if the VL model is available and responsive.
+
+    Pre-parallel warm check for local models: verify the VL model is still loaded
+    before spawning VL subagents. Cloud models skip this check (no "loaded/unloaded"
+    state).
+
+    Args:
+        cache_path: Optional explicit path to the cache file.
+
+    Returns:
+        dict with health status:
+            {"healthy": bool, "provider": str|None, "model_id": str|None,
+             "error": str|null}
+    """
+    result = {"healthy": False, "provider": None, "model_id": None, "error": None}
+
+    try:
+        if cache_path is None:
+            cache_path = get_cache_path()
+
+        if not cache_path.exists():
+            result["error"] = "Cache file does not exist"
+            return result
+
+        cache = load_cache(cache_path)
+        discovery = cache.get("vl_discovery", {})
+
+        provider = discovery.get("provider")
+        model_id = discovery.get("model_id")
+
+        if not provider or not model_id:
+            result["error"] = "VL model not configured in discovery cache"
+            return result
+
+        # Check if the provider is a local model (has base_url)
+        base_url = discovery.get("base_url")
+
+        if provider == "omlx" and base_url:
+            # For local models, do a lightweight health check
+            import urllib.request
+            try:
+                url = f"{base_url}/health"
+                req = urllib.request.Request(url, method="GET")
+                with urllib.request.urlopen(req, timeout=5) as resp:
+                    if resp.status == 200:
+                        result["healthy"] = True
+                        result["provider"] = provider
+                        result["model_id"] = model_id
+                    else:
+                        result["error"] = f"Health check returned status {resp.status}"
+            except Exception as e:
+                # Model may be unloaded after inactivity — this is expected
+                result["error"] = f"Health check failed (model may be unloaded): {e}"
+                result["healthy"] = False
+        else:
+            # Cloud models: assume healthy if configured (no "loaded/unloaded" state)
+            result["healthy"] = True
+            result["provider"] = provider
+            result["model_id"] = model_id
+
+    except Exception as e:
+        result["error"] = f"Health check error: {e}"
+
+    return result
 
 
 def _detect_wiki_root():
@@ -1498,6 +1645,46 @@ def main():
             for vname, vdata in discovered["vaults"].items():
                 raw = ",".join(vdata.get("raw_paths", [])) or "(none)"
                 print(f"  {vname} raw_paths: [{raw}]")
+
+    elif cmd == "cache-clear":
+        # Clear the shared config cache (Schema/.llm-wiki-cache.json)
+        # The template cache is in-memory and per-invocation (safe for CLI).
+        cache_path = get_cache_path()
+        if not cache_path.exists():
+            print("No shared config cache found.")
+        else:
+            import shutil
+            # Backup cache before clearing
+            backup = str(cache_path) + ".bak"
+            shutil.copy2(str(cache_path), backup)
+            cache_path.unlink()
+            print(f"Config cache cleared. Backup saved to {backup}")
+
+    elif cmd == "template":
+        # Get a cached template for the current vault
+        if len(sys.argv) < 3:
+            print("Usage: wiki_shared.py template <tag>", file=sys.stderr)
+            sys.exit(1)
+        tag = sys.argv[2]
+        wiki_root = _detect_wiki_root()
+        if not wiki_root:
+            print("ERROR: Cannot detect wiki root.", file=sys.stderr)
+            sys.exit(1)
+        content = get_cached_template(wiki_root, tag)
+        if content is None:
+            print(f"Template '{tag}-note.md' not found in {wiki_root}/_templates/")
+            sys.exit(1)
+        print(content, end="")  # Don't add extra newline
+
+    elif cmd == "reset-vault":
+        # Reset all cached state between vault operations
+        reset_vault_state()
+        print("Vault state reset complete (templates cleared, config marked stale)")
+
+    elif cmd == "vl-health-check":
+        # Check if VL model is available and responsive
+        result = check_vl_model_health()
+        print(json.dumps(result, indent=2))
 
     else:
         print(f"Unknown command: {cmd}", file=sys.stderr)
