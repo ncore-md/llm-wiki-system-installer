@@ -176,6 +176,10 @@ python3 scripts/wiki_shared.py models note_generation
 
 **Model warm-reuse (subagent path only):** The cache flag `defaults.agent_has_vision: True` plus the task override for `image_ingest` keep the ~20GB VL model loaded between subagent calls. After one initial cold start (60-90s), subsequent calls reuse the warm model (~10-20s). Spawn each subagent as a separate call — no batching. If you are analyzing images directly, this warm-reuse does not apply.
 
+**VL model health check timing:** Before spawning any VL subagents, call `check_vl_model_health()` (from wiki_shared.py). If the model is unavailable or degraded:
+- Skip VL processing entirely and continue with text sources only (inform user)
+- Do NOT wait or retry — the health check result is cached for the session
+
 **Hybrid streaming VL processing (multiple images):**
 1. Model warm-reuse: `defaults.agent_has_vision: True` + task override keep VL model loaded between calls
 2. Spawn first batch of VL subagents with `async: true` (up to concurrency limit, default 4)
@@ -291,23 +295,25 @@ subagent({
 - `$SOURCE_MAPPING`: JSON describing source-to-vault relationships (from orchestrator context)
 
 **Process:**
-1. Read `$VL_OUTPUT_FILE` and parse metadata lines before each `---NOTE_BOUNDARY---`
-2. Apply consolidation rules (R1-R8 from llm-wiki-consolidate skill):
-   - R1: Same-source sequential images → MERGE into single note
-   - R2: Standalone screenshot with no related images → KEEP as standalone note  
-   - R3/R4: Cross-topic overlap → FLAG for human review (low confidence) or PARTIAL MERGE (medium)
-   - R5: Existing topic already covers concept → UPDATE existing note instead of create
-   - R6: Missing metadata fields → use sensible defaults (consolidation confidence = medium)
-   - R7: Low-quality VL output → DON'T pollute merged notes
-3. Produce JSON decision document at `$CONSOLIDATE_OUTPUT_FILE` with:
-   - `notes_written`: actions to take (create/update paths, tags, topics)
-   - `ambiguous_cases`: items requiring human review
-   - `summary`: counts of created, updated, ambiguous, rejected
-4. Orchestrator reviews decision document and executes writes via `obsidian_write`/`obsidian_append`
-5. Orchestrator resolves any ambiguous cases manually
+1. Spawn a subagent with the `llm-wiki-consolidate` skill (model: orchestrator's text model, config-driven)
+2. Pass to the subagent:
+   - `$VL_OUTPUT_FILE` as a file reference (negligible token impact ~800 tokens)
+   - `$SOURCE_MAPPING` JSON from orchestrator context
+   - Optional: catalog context if needed for R5 (existing topic detection)
+3. The consolidate subagent applies rules R1-R8 and produces a JSON decision document at `$CONSOLIDATE_OUTPUT_FILE`
+4. Orchestrator reads the decision document and executes writes via `obsidian_write`/`obsidian_append`
+5. Orchestrator reviews and resolves any `ambiguous_cases` (R3/R4 cross-topic overlap, R7 low-quality VL output)
 6. Continue with Steps 1-9 (text source processing)
 
 **Note:** The consolidate skill does NOT write notes to disk — it produces only the decision document. The orchestrator executes all writes based on this output.
+
+**Metadata Stripping Parser (Orchestrator):** Before passing VL output to consolidate or writing notes, the orchestrator strips metadata lines from each note draft:
+- Regex pattern (per-note): `^---(SOURCE_NOTE|IMAGE_INDEX|CONSOLIDATION_CONFIDENCE|CONSOLIDATION_REASON):\s*.+$`
+- Strip all matching lines that appear BEFORE each `---NOTE_BOUNDARY---` separator
+- Graceful fallback: if a line starts with `---` but doesn't match metadata pattern, keep it (it's part of the note content)
+- Missing fields: if SOURCE_NOTE is absent, derive from filename heuristics; if IMAGE_INDEX missing, default to 1/N where N = total notes in batch
+- Malformed output: if VL produces verbose reasoning before note drafts, extract structured markdown blocks (look for `---YAML---` frontmatter markers)
+- Edge case: metadata lines may contain colons in values (e.g., `SOURCE_NOTE: tutorial-install.md`), regex handles this via greedy capture after first colon
 
 ### Step 1 — Clean & Store Raw Source
 **Action:** Write cleaned Markdown into the vault's configured raw paths (from config `raw_paths`) using the native tools. Use the first writable path in the list (e.g., `Raw/Sources/`). **Skip this step for image files** — they bypass cleaning entirely and go from VL analysis (Step 0) directly to Steps 2–9.

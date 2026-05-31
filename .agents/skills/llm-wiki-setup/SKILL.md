@@ -1,9 +1,6 @@
 ---
 name: llm-wiki-setup
-description: Create .llm-wiki-config/config.json for first-time wiki setup. Use when config is missing, on first run, or user wants to add/change vaults.
-compatibility: Python 3.8+, Obsidian running with CLI enabled, Chrome DevTools Protocol access
-metadata:
-  category: wiki-setup
+description: Set up the LLM Wiki project config when no .llm-wiki-config/config.json exists. Uses Obsidian CLI and obsidian skills to discover available vaults, then guides the user through declaring them with permissions.
 ---
 
 ## When triggered

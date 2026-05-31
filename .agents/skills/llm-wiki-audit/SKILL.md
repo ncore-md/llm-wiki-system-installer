@@ -1,9 +1,6 @@
 ---
 name: llm-wiki-audit
-description: Scan wiki repo for secrets, broken wikilinks, orphaned notes, and coverage gaps. Use before pushing to public repos or when user asks about security compliance.
-compatibility: Python 3.8+, Git repo initialized, Chrome DevTools Protocol access
-metadata:
-  category: wiki-security
+description: Security and compliance audit for the wiki repository. Scans for secrets, broken references, orphaned notes, and data exposure risks.
 ---
 
 ## When to use
@@ -12,10 +9,38 @@ Before pushing changes to a public repository, or when the user asks about secur
 ## Prerequisites
 - **Vault must be identified before any operation** — see Vault Selection below.
 
+## Pre-flight Check (Required Before Vault Selection)
+**Before attempting vault selection, verify config is usable.** If it's missing or empty, offer setup.
 
-## Shared Infrastructure
+1. **Check vaults:**
+   ```bash
+   cd <wiki-root> && python3 scripts/wiki_shared.py vaults 2>&1
+   ```
 
-**Pre-flight Check and Vault Selection are handled by the shared infrastructure.** See `references/shared-infra.md` for details.
+2. **If output lists vaults** (e.g., `Core [read,write,...]`): proceed to Vault Selection.
+
+3. **If output is empty or says "No project config":**
+   - Tell the user: "Config not found or has no vaults declared (.llm-wiki-config/config.json). Without it, wiki operations can't proceed."
+   - Ask: "Would you like to run the setup wizard? It will discover your Obsidian vaults and let you assign permissions (read, write, ingest, maintain)."
+   - **If user agrees:** spawn a subagent to run setup:
+     ```javascript
+     subagent({
+       agent: "scout",
+       task: "Run the llm-wiki-setup workflow to create .llm-wiki-config/config.json. Walk up from wiki root, discover vaults via obsidian CLI, guide user through permission selection, write config file.",
+       skill: "llm-wiki-setup"
+     })
+     ```
+   - **If user declines:** stop and explain wiki operations require a project config.
+
+## Vault Selection (Required Before Any Operation)
+This skill is **vault-agnostic**. It works with any Obsidian vault that contains an LLM Wiki structure.
+
+**FIRST ACTION: Before performing ANY step, identify which vault to audit.**
+
+1. **If the user explicitly named a vault** (e.g., "audit Core", `/llm-wiki-audit Core`), use that name directly.
+2. **Otherwise, use the list from Pre-flight Check** (already ran `wiki_shared.py vaults`). Present it and ask: "Available vaults (from project config): [list]. Which one do you want to audit?"
+
+3. **Validate** — confirm the selected vault is in the list from Pre-flight Check.
 
 ## Reference
 - `<wiki-root>/AGENTS.md` — Core Rules, when to run audit
@@ -72,19 +97,3 @@ The wiki root is at the path declared in `.llm-wiki-config/config.json` under `w
 - **Audit is separate from lint** — it checks security and exposure risk, not schema correctness. Lint handles frontmatter validation; audit handles secrets and compliance
 - **Use configured patterns** — respect `.llm-wiki-config/audit-rules.json` if present; use built-in defaults otherwise
 - **Respect skip lists** — do not scan files/directories listed in `skip_dirs` or `skip_files` rules
-
-## Error Handling
-
-- **Vault selection fails** — If `obsidian list-vaults` returns no vaults, run llm-wiki-setup first
-- **Obsidian CLI connection fails** — Verify Obsidian is running. Retry once after 10s, then report
-- **Config missing** — If `.llm-wiki-config/config.json` is absent, run llm-wiki-setup before scanning
-- **Git not initialized** — If `git status` fails, report that the repo is not a git repository and abort
-- **Permission denied** — If scanning fails on specific files, skip them with a warning. Do not fail the entire audit
-
-## What Not to Do (Anti-Patterns)
-
-- **Do not report local paths in private repos** — Local file references are normal wiki behavior, not security findings
-- **Do not skip critical findings** — Secrets and tokens found in tracked files MUST be reported. Never suppress them
-- **Do not confuse audit with lint** — Audit checks security/exposure risk. Lint checks schema quality. Do not mix these concerns
-- **Do not scan .git/ or node_modules/** — These directories are excluded by default. Do not add them to scan paths
-- **Do not recommend deleting secrets** — Report exposed credentials but do NOT delete them. The user should rotate the credential first
