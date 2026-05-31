@@ -1,6 +1,9 @@
 ---
 name: llm-wiki-vl
-description: Analyze images and produce clean Obsidian wiki notes. Use when a subagent needs vision capabilities to extract structured content from images (screenshots, diagrams, checklists) and convert it into properly formatted wiki notes with YAML frontmatter.
+description: Analyze images to produce wiki notes via subagent. Use when image sources need processing — screenshots, diagrams, checklists.
+compatibility: Vision-capable model (gemini-2.5-pro or equivalent), read tool access
+metadata:
+  category: wiki-vision
 ---
 
 # LLM Wiki — Vision Language Skill
@@ -42,7 +45,7 @@ source_count: N
 # Title
 
 ## Key Points
-- bullet 1 (max 5, concise)
+- bullet N (concise, capturing all essential information)
 - bullet 2
 - bullet 3
 
@@ -77,7 +80,8 @@ source_count: N
 1. Read the image using your `read` tool — see it directly, no encoding needed.
 2. Extract all visible text, labels, structure, and visual elements.
 3. Identify wiki-worthy concepts: what notes should be created? What do users need to know about this content?
-4. Match concepts to existing topic notes (use the provided list).
+4. If image contains multiple distinct concepts/tools/features, produce separate notes for each (one per concept). Use ---NOTE_BOUNDARY--- to separate them.
+5. Match concepts to existing topic notes (use the provided list).
 5. Use real image filenames from the provided list for `sources`.
 6. Write clean notes following the Output Format exactly.
 

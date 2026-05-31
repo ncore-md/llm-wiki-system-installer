@@ -1,6 +1,9 @@
 ---
 name: llm-wiki-lint
-description: Check wiki note quality, validate frontmatter, and run linting before commits.
+description: Validate wiki notes for schema compliance. Use when user asks to check quality, before committing changes, or after creating/editing notes.
+compatibility: Python 3.8+, Chrome DevTools Protocol access, config.json present
+metadata:
+  category: wiki-quality
 ---
 
 ## When to use
@@ -9,40 +12,10 @@ The user asks to check wiki quality, before committing changes that affect Wiki 
 ## Prerequisites
 - **Vault must be identified before any operation** — see Vault Selection below.
 
-## Pre-flight Check (Required Before Vault Selection)
-**Before attempting vault selection, verify config is usable.** If it's missing or empty, offer setup.
 
-1. **Check vaults:**
-   ```bash
-   cd <wiki-root> && python3 scripts/wiki_shared.py vaults 2>&1
-   ```
+## Shared Infrastructure
 
-2. **If output lists vaults** (e.g., `Core [read,write,...]`): proceed to Vault Selection.
-
-3. **If output is empty or says "No project config":**
-   - Tell the user: "Config not found or has no vaults declared (.llm-wiki-config/config.json). Without it, wiki operations can't proceed."
-   - Ask: "Would you like to run the setup wizard? It will discover your Obsidian vaults and let you assign permissions (read, write, ingest, maintain)."
-   - **If user agrees:** spawn a subagent to run setup:
-     ```javascript
-     subagent({
-       agent: "scout",
-       task: "Run the llm-wiki-setup workflow to create .llm-wiki-config/config.json. Walk up from wiki root, discover vaults via obsidian CLI, guide user through permission selection, write config file.",
-       skill: "llm-wiki-setup"
-     })
-     ```
-   - **If user declines:** stop and explain wiki operations require a project config.
-
-## Vault Selection (Required Before Any Operation)
-This skill is **vault-agnostic**. It works with any Obsidian vault that contains an LLM Wiki structure.
-
-**FIRST ACTION: Before performing ANY step, identify which vault to lint.**
-
-1. **If the user explicitly named a vault** (e.g., "lint Core", `/llm-wiki-lint Core`), use that name directly.
-2. **Otherwise, use the list from Pre-flight Check** (already ran `wiki_shared.py vaults`). Present it and ask: "Available vaults (from project config): [list]. Which one do you want to lint?"
-
-3. **Validate** — confirm the selected vault is in the list from Pre-flight Check.
-
-**Once identified, use that exact vault name for every `obsidian` command.**
+**Pre-flight Check and Vault Selection are handled by the shared infrastructure.** See `references/shared-infra.md` for details.
 
 ## Reference
 - `<wiki-root>/AGENTS.md` — Core Rules (Non-Negotiable), Allowed Tags section, directory structure
@@ -88,5 +61,21 @@ print(json.dumps(rules, indent=2))"
    ```bash
    cd <wiki-root> && python3 scripts/wiki_tool.py source-lint
    ```
+   This validates raw source frontmatter (title, reference/source present, created date format) and coverage state: processed sources must have `covered_by` entries that actually exist on disk. Stale or missing coverage is reported as errors.
 
 7. **Report any issues** found with file names and specific violations. Fix lint failures before committing — never commit past a failed lint.
+
+## Error Handling
+
+- **Vault selection fails** — If `obsidian list-vaults` returns no vaults, run llm-wiki-setup first
+- **Obsidian CLI connection fails** — Verify Obsidian is running. Retry once after 10s, then report
+- **Config missing** — If `.llm-wiki-config/config.json` is absent, run llm-wiki-setup first
+- **Lint tool errors** — If `wiki_tool.py lint` crashes, report the error and continue with manual checks
+- **Schema validation errors** — If a note has invalid frontmatter, report the exact field and line. Do not auto-correct
+
+## What Not to Do (Anti-Patterns)
+
+- **Do not skip source_count validation** — This is the most critical check. Verify it always equals `sources` array length
+- **Do not auto-fix frontmatter** — Report violations but do not edit YAML directly. Let the user or maintainer fix issues
+- **Do not treat warnings as errors** — Warnings (missing dates, extra fields) should be reported but do not block commits
+- **Do not ignore source-lint results** — Raw sources must have title, reference/source, and created date. Flag all missing fields
