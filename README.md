@@ -2,7 +2,7 @@
 
 **A structured, agent-optimized knowledge base built on Obsidian.**
 
-Turns raw source material into organized, queryable knowledge that AI agents and humans can use. Ingest articles, notes, and transcripts → compile into structured Wiki notes → validate on every commit → query via a searchable catalog.
+Drop in articles, notes, or transcripts → get structured Wiki entries with quality gates on every commit. Query the compiled knowledge before creating new content, and scan for secrets before pushing to public repos.
 
 ---
 
@@ -22,8 +22,6 @@ Turns raw source material into organized, queryable knowledge that AI agents and
 ---
 
 ## 1. What is LLM Wiki?
-
-LLM Wiki turns raw source material into organized, queryable knowledge that AI agents and humans can use. It manages a pipeline from raw sources (articles, notes, transcripts) through compilation into structured Wiki notes with strict quality gates — every commit runs build + lint checks, and pushes to public repos are scanned for secrets before they leave your machine.
 
 ### Where it fits
 
@@ -640,18 +638,6 @@ Yes — see `README.pt-BR.md` in the installer folder.
 
 ---
 
-## Core Rules (Non-Negotiable)
-
-1. **Keep Raw sources faithful.** Never overwrite original content during compilation.
-2. **One concept per note, 3–5 key points max.** Split or truncate if more.
-3. **Plain tags only** — no formatting in frontmatter, never inline `#tags`.
-4. **Always include topics and sources** on every compiled note — even if empty (`[]`).
-5. **Query from catalog first**, not raw Obsidian search or broad context scans.
-6. **Set source_count at write time, verify via build.** Never commit with a mismatched count.
-7. **Never overwrite Raw sources** when creating or updating Wiki notes.
-
----
-
 ## File I/O Discipline
 
 | Operation | Method | Why |
@@ -689,5 +675,3 @@ source_count: 1          # Must match sources array length
 - Scalar `tags: concept` instead of block array `tags:\n  - concept` — breaks parser
 
 ---
-
-*LLM Wiki System — structured, agent-optimized knowledge base built on Obsidian.*
