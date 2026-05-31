@@ -33,7 +33,7 @@ Think of it as a **knowledge base framework** that lives alongside Obsidian: the
 
 ### Installation
 
-#### One-liner (clone + run setup)
+#### Quick install (one-liner)
 
 ```bash
 git clone https://github.com/ncore-md/llm-wiki-system-installer.git && cd llm-wiki-system-installer && bash scripts/setup-wizard.sh
@@ -41,22 +41,16 @@ git clone https://github.com/ncore-md/llm-wiki-system-installer.git && cd llm-wi
 
 #### Step-by-step
 
-**Step 1: Clone the installer to your project root:**
+**Step 1:** Clone the installer into your project root:
 
 ```bash
 git clone https://github.com/ncore-md/llm-wiki-system-installer.git
 ```
 
-**Step 2: Run the setup wizard:**
+**Step 2:** Run the setup wizard:
 
 ```bash
 cd llm-wiki-system-installer && bash scripts/setup-wizard.sh
-```
-
-#### Step 2: Run the setup wizard
-
-```bash
-bash llm-wiki-system-installer/scripts/setup-wizard.sh
 ```
 
 The wizard creates your vault structure, copies skills and tooling into the vault, installs git hooks (pre-commit + pre-push), registers the vault path, and validates with an initial build.
