@@ -25,6 +25,8 @@
 
 **Hard rule:** If C0 triggers (timestamp/promo patterns remain) or C4 triggers (empty sources), do NOT proceed to Step 2. Fix immediately, re-verify, then continue.
 
+**Image-only markdown detection (`--keep-images` flag):** After source validation, if the `--keep-images` flag was passed to ingest, check each markdown file whose body contains only image embeds (`![](...)`) with no substantive text. Extract the embedded image paths and route them through VL processing (same path as raw images on disk). If `--keep-images` is NOT set, continue with current behavior (image-only sources cleaned normally, may become empty and be skipped/deleted). Default: flag not set (backward compatible).
+
 ### Step 0 - Check for Pending Sources
 **Action:** Before asking the user for a source, discover vault config and check each validated vault's raw paths for files that need processing.
 
@@ -337,6 +339,10 @@ Source files preserve ALL factual content from the original. They are NOT summar
 
 **⚠️ CRITICAL: Always read the full file before editing.** Never use line-index slicing (e.g., `lines[13:]`) without first verifying the file structure. Frontmatter boundaries vary by source — always find `---` delimiters programmatically or visually before assuming positions.
 
+**⚠️ Empty-after-clean guard:** Before removing image embeds, check if the file body contains ONLY image embeds and no substantive text. If removing all `![](...)` would leave the file with only frontmatter:
+- **If `--keep-images` flag is set:** DO NOT remove embeds. Skip cleaning and route to VL processing.
+- **If `--keep-images` is NOT set:** Skip this source entirely and log "skipped (image-only, --keep-images not set)". Do NOT delete the file.
+
 **What to remove (deterministic):** timestamps (`**0:08** ·`, `01:10 Chapter`), `[music]`/`[snorts]` markers, promo lines (subscribe prompts, Kickstarter/Discord/Steam links, "link in description"), image embeds (`![](...)`).
 **What to keep (source-faithful): ALL factual content.** Quotes, data points, technical explanations, paper names/authors/institutions/dates, quantitative results (accuracy numbers, benchmarks), core arguments and conclusions. Preserve every fact from the original.
 **⚠️ NO TRUNCATION:** Scripts must never truncate body content. Remove only deterministic noise (timestamps, promo lines). All factual/structural content must be preserved 100%. For large files (>5,000 chars), use in-context editing with `obsidian_write` instead of scripts.
@@ -390,7 +396,20 @@ Open only the most relevant notes — not all Raw context. Understand what alrea
 - Identify if a note should be **updated** (add source references) vs. created new
 - Find existing wikilinks to connect into
 
-### Step 4 — Create or Update Wiki Notes
+### Step 4 — Pre-Write Isolation Check
+**Action:** Before calling `obsidian_write` for any compiled note, verify isolation and provenance. This check prevents cross-source contamination (content from Source A bleeding into notes written for Source B) and ensures all wikilinks resolve within the target vault only.
+
+**Run before every `obsidian_write` call:**
+1. **Source derivation check:** Verify all body content in the note derives ONLY from the declared source(s). No content should originate from a different raw file. If processing multiple sources in parallel, confirm each note's text matches its own source — not a sibling source.
+2. **Wikilink scope check (C12 pre-check):** Scan all wikilinks in the note's frontmatter and body. Every `[[wikilink]]` must resolve within this vault's `wiki_root`. If any link points outside the current vault, FIX before writing.
+3. **Sources array validation:** Verify `sources:` in frontmatter contains ONLY wikilinks to raw sources from the current batch. No stale or cross-vault source paths allowed.
+4. **Template compliance:** Confirm the note starts from the correct vault template (read in Step 5's pre-step). All required sections (`## Related`, `## Sources`) are present. Frontmatter arrays use block-array syntax (not scalar).
+
+**If any check fails:** Do NOT call `obsidian_write`. Fix the issue, re-verify, then proceed.
+
+**This check is lightweight:** It uses `grep` on the note content you just prepared — no tool calls, no external reads. It takes seconds and prevents catalog corruption from cross-source contamination.
+
+### Step 5 — Create or Update Wiki Notes
 **Action:** Use native tools to create focused wiki notes in the correct folder per tag routing.
 
 **MANDATORY: Read template before writing.** Every new note MUST start from the corresponding vault template. This ensures consistent frontmatter, required sections (`## Related`, `## Sources`), and proper array formatting.
@@ -533,10 +552,8 @@ If you ever see escaped quotes (`\"`) in the YAML that don't match the actual fi
 
 **To update an existing note:** Use `obsidian read path="..." vault="<vault-name>"` to get current content. Append new body sections with the `obsidian_append` tool (`note="..."`, `content="<new content>"`, `vault="<vault-name>`). For frontmatter updates — including single-value fields like `source_count` and list properties like `sources` — use the `obsidian_write` tool with full note content (read → modify frontmatter in YAML → write back). The `obsidian property:set` command does not support append semantics for list-type properties (it replaces the entire list), making it unreliable for adding sources or topics to existing notes.
 
-### Step 5 — (Integrated into Steps 1 & 4)
-Source links are added as part of note creation/updates. The `sources` array in frontmatter contains wikilinks to Raw sources, and `source_count` must equal the number of entries.
-
 ### Step 6 — Validate with Wiki Tool (Single Vault)
+
 **Action:** Run build, lint, and source-lint to enforce the wiki's schema contract.
 
 ```bash
@@ -550,11 +567,10 @@ python3 scripts/wiki_tool.py build && python3 scripts/wiki_tool.py lint && pytho
 If ANY check fails, fix the issues and repeat. This is your quality gate — Python scripts enforce rules Obsidian doesn't know about (source resolution, schema compliance). Do NOT skip `source-lint` — it catches issues that lint doesn't (raw source frontmatter, coverage state).
 
 ### Step 6b — Post-Ingest Parallel Validation (Multi-Vault)
-**Action:** After all vaults complete Steps 0–9 individually, run `build + lint + source-lint` in parallel across all vaults using the cross-vault validation script.
 
 **Rationale:** When processing 3+ vaults sequentially (same session), running validation in parallel reduces total time from `sum(validation_time)` to `max(validation_time)`. Each vault's validation is independent (different wiki_root, no shared state).
 
-**Post-ingest validation:** After Steps 0-9 complete for all selected vaults, run `python3 scripts/wiki_tool_all.py validate-all` on each vault in parallel. Report failures per-vault independently.
+**Post-ingest validation:** After Steps 0–9 complete for all selected vaults, run `python3 scripts/wiki_tool_all.py validate-all` on each vault in parallel. Report failures per-vault independently.
 
 **Command:**
 ```bash
@@ -563,7 +579,7 @@ python3 scripts/wiki_tool_all.py validate-all [--vault A,B,C]
 This discovers all vaults from project config, runs `build + lint + source-lint` per vault with a 90-second timeout each, and reports consolidated results.
 
 **Result handling:**
-- **All vaults pass:** Proceed to Step 9 (commit each individually)
+- **All vaults pass:** Proceed to Step 10 (commit each individually)
 - **One or more fail:** The script reports which vaults failed and why. User decides:
   - Fix the failing vault(s) and re-validate
   - Commit passing vaults now, defer failing ones (use `--no-verify` on pre-commit hook)
@@ -580,7 +596,7 @@ python3 scripts/wiki_tool.py source-scan --update --accept-covered
 
 This tracks which raw sources have been processed and how many wiki notes they produced. **Important:** `--accept-covered` validates that all wiki notes in `covered_by` still exist on disk and automatically removes stale entries. Sources with no valid coverage are marked unprocessed.
 
-**Note:** Image files processed in Step 0 are not tracked by this manifest (they have no frontmatter and were never stored as markdown in the configured raw paths). Notes created from images may reference the image file path in their `sources` array if relevant, but these will not appear in source-scan output.
+**Note:** Image files processed in Step 0 (including image-only markdown routed through VL) are not tracked by this manifest (they have no frontmatter and were never stored as markdown in the configured raw paths). Notes created from images may reference the image file path in their `sources` array if relevant, but these will not appear in source-scan output.
 
 ### Step 8 — Log the Change
 **Action:** Use `wiki_tool.py log` to append a timestamped entry if the ingest meaningfully changed the Wiki (new notes created, existing notes updated).

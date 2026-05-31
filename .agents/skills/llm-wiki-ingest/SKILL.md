@@ -50,13 +50,13 @@ This skill is **vault-agnostic**. It works with any Obsidian vault that contains
 
 **Single-vault shortcut:** If the Pre-flight Check returns exactly one vault, skip selection and use it directly. No confirmation needed.
 
-1. **If the user explicitly named vault(s)** (e.g., "ingest into Core", `/llm-wiki-ingest Core NLite`), or they were provided as invocation arguments, use those names directly. The special value `all` means every declared vault.
+1. **If the user explicitly named vault(s)** (e.g., "ingest into <vault-name>", `/llm-wiki-ingest <vault-1> <vault-2>`), or they were provided as invocation arguments, use those names directly. The special value `all` means every declared vault.
    ```bash
    obsidian ... vault="<name>"
    ```
 2. **Otherwise, use the list from Pre-flight Check** (already ran `wiki_shared.py vaults`). If there's more than one vault, present it and ask: "Available vaults (from project config): [list]. Which one(s) do you want to work with? (Type **all** to select every vault.)"
 
-3. **If the user mentions a wiki by name** (e.g., "the Core wiki"), do NOT assume it maps to a vault with the same name — discover from config and let them select.
+3. **If the user mentions a wiki by name** (e.g., "the <vault-name> wiki"), do NOT assume it maps to a vault with the same name — discover from config and let them select.
 
 **Once identified, use that exact vault name for every `obsidian` command in this workflow.** If multiple vaults were selected, run the full Steps 1–9 for each one sequentially. Do not change a vault mid-workflow.
 
@@ -179,6 +179,7 @@ Run these from the wiki root directory (the same directory that contains `AGENTS
 | C9 | **On-disk filename match** — verify frontmatter source paths match actual filenames on disk (especially for apostrophes, curly quotes) | `ls <RAW_PATH>/ | grep <keyword>` — compare against frontmatter |
 | C0 | **Read-back source body** — after cleaning, explicitly read back the cleaned file and verify NO timestamp patterns (`**X:XX** ·`, `HH:MM:SS - Title`), promo lines, or image embeds remain | Read first 50 and last 50 lines of the cleaned source file. If any timestamp/promo pattern found, clean again before proceeding to Step 2 |
 | C10 | **Pre-commit lint** — run `lint` + `source-lint` explicitly before asking user to commit | `python3 scripts/wiki_tool.py lint && python3 scripts/wiki_tool.py source-lint` |
+| C12 | **Cross-reference isolation** — verify all wikilinks in newly written notes resolve within the target vault's wiki_root | Config-driven: `efficient` mode (default, run once after all Steps 0–9 complete for the vault) or `strict` mode (run after every individual note write). Set via `defaults.isolation_mode: "efficient"` or `"strict"` in config.json. Scan all notes in Wiki/ directory — if any wikilink does not resolve within this vault's wiki_root, FIX before proceeding. |
 
 **Hard rule:** If C0 triggers (timestamp/promo patterns remain) or C4 triggers (empty sources), do NOT proceed to Step 2. Fix immediately, re-verify, then continue.
 
@@ -286,17 +287,17 @@ python3 scripts/wiki_shared.py discover [--force]
 The `--force` flag re-runs discovery even if cache is fresh. Without it, the shared utility checks `defaults.agent_has_vision` and `vl_discovery.provider/model_id/base_url` — if all are populated, it returns cached results.
 
 **Interpret the discovery result (JSON output):**
-- **`provider: "omlx", model_id, base_url populated`** — use the discovered local engine. Read values from cache output.
+- **`provider: "<vl-provider>", model_id, base_url populated`** — use the discovered local engine. Read values from cache output.
 - **All null/empty** — No VL model found locally. Inform the user that image processing is unavailable and continue with markdown sources only.
 
 To set defaults (so all skills use consistent models):
 ```bash
-python3 scripts/wiki_shared.py set-default vl_provider omlx
-python3 scripts/wiki_shared.py set-default text_model_id "qwen3.6-35b-a3b-oQ6"
+python3 scripts/wiki_shared.py set-default vl_provider <vl-provider>
+python3 scripts/wiki_shared.py set-default text_model_id "<text-model-id>"
 ```
 To set per-task overrides:
 ```bash
-python3 scripts/wiki_shared.py set-override image_ingest vl_model_id "qwen3.6-35b-a3b-mlx-vl-oQ4-FP16"
+python3 scripts/wiki_shared.py set-override image_ingest vl_model_id "<vl-model-id>"
 ```
 To resolve which model to use for a task:
 ```bash
@@ -312,13 +313,20 @@ python3 scripts/wiki_shared.py models note_generation
   - **Array format:** Multi-value fields MUST use YAML block-array syntax (`ContentType:\n  - video`), never scalar form.
   - Fields are clean (no promotional URLs or junk in values)
   - The file has substantive body content beyond frontmatter
-  Files that fail these checks should be fixed in place (clean the frontmatter, normalize format) before proceeding. Files that are empty or contain only images/embeds without text should be flagged and removed.
+  Files that fail these checks should be fixed in place (clean the frontmatter, normalize format) before proceeding. Files that are empty or contain only images/embeds without text should be handled per the **Image-Only Markdown Detection** rule below.
+
+**Image-only markdown detection (`--keep-images` flag):** After source validation, if the `--keep-images` flag was passed to ingest, check each markdown file whose body contains only image embeds (`![](...)`) with no substantive text. These are markdown wrappers around images (e.g., YouTube clipping screenshots). For each detected file:
+1. Extract the image paths from `![](...)` syntax in the body.
+2. Route each embedded image through VL processing (same path as raw images discovered on disk in Step 0). Pass the extracted image paths to VL subagents.
+3. The VL output flows through the Consolidate step, then Steps 2–9 as normal.
+
+If `--keep-images` is NOT set, continue with current behavior: markdown files whose bodies become empty after cleaning are treated as sources to be cleaned and may be skipped/deleted if they contain no text. The default behavior (no flag) preserves backward compatibility — image-only sources are cleaned normally and may be discarded if empty after cleaning.
 - **Other files**: Skip unless clearly a usable content source.
 
 **Image Processing:** Each unprocessed image must be analyzed and converted into wiki notes. Choose the approach that matches your capabilities:
 
 - **If you have VL/image reading capability:** read each image directly with your `read` tool, then write wiki notes using the output format rules below.
-- **If you do NOT have VL capability:** spawn a subagent with the `llm-wiki-vl` skill for each image. The child reads images via its own `read` tool and writes notes as output.
+- **If you do NOT have VL capability:** spawn a subagent with the `llm-wiki-vl` skill for each image. The child reads images via its own `read` tool and produces note text that you capture in `$VL_OUTPUT_FILE`. The VL subagent must NEVER write files to disk — it only produces text output.
 
 **Model warm-reuse (subagent path only):** The cache flag `defaults.agent_has_vision: True` plus the task override for `image_ingest` keep the ~20GB VL model loaded between subagent calls. After one initial cold start (60-90s), subsequent calls reuse the warm model (~10-20s). Spawn each subagent as a separate call — no batching. If you are analyzing images directly, this warm-reuse does not apply.
 
@@ -370,7 +378,7 @@ python3 scripts/wiki_shared.py models note_generation
 python3 << 'PYEOF'
 import sys, os
 sys.path.insert(0, os.getcwd())
-os.chdir("<wiki-root>")  # e.g., /Users/bernardoresende/Core/.llm-wiki/Core
+os.chdir("<wiki-root>")  # project's wiki root from config discovery
 from scripts.wiki_shared import resolve_model
 model_info = resolve_model("image_ingest")
 provider = model_info.get("provider")
@@ -379,7 +387,7 @@ base_url = model_info.get("base_url")
 if not provider or not model_id:
     print(f"ERROR: VL model not configured. Set vl_provider and vl_model_id in .llm-wiki-config/config.json.")
     sys.exit(1)
-print(f"{provider}/{model_id}")  # e.g., omlx/qwen3.6-35b-a3b-mlx-vl-oQ4-FP16
+print(f"{provider}/{model_id}")  # e.g., <vl-provider>/<vl-model-id>
 PYEOF
 ```
 
@@ -392,29 +400,68 @@ subagent({
     "EXISTING TOPICS:\n" + open("/tmp/existing_topics.txt").read() + "\n"
     "REAL IMAGE FILES:\n" + open("/tmp/real_image_files.txt").read() + "\n"
     "Follow the llm-wiki-vl skill for output format and rules.",
-  model: "<omlx_vl_model_id>",      # e.g., omlx/qwen3.6-35b-a3b-mlx-vl-oQ4-FP16
+  model: "<vl-model-id>",
   skill: "llm-wiki-vl",
   output: "$VL_OUTPUT_FILE"
 })
 ```
 
 **Key details:**
-- **Delegation is optional.** If you can read images yourself, do so directly. Otherwise spawn a subagent with `llm-wiki-vl` skill — the child reads images via its own `read` tool and writes notes as output.
-- The `llm-wiki-vl` skill (injected into the subagent) provides output format rules, tag routing, and frontmatter schema.
+- **Delegation is optional.** If you can read images yourself, do so directly. Otherwise spawn a subagent with `llm-wiki-vl` skill — the child reads images via its own `read` tool and produces note text that you capture in `$VL_OUTPUT_FILE`. The VL subagent must NEVER write files to disk.
+- The `llm-wiki-vl` skill (injected into the subagent) provides output format rules, tag routing, frontmatter schema, and metadata fields (SOURCE_NOTE, IMAGE_INDEX, CONSOLIDATION_CONFIDENCE).
 - Existing topics are passed as context so the subagent can populate `topics` with real wikilinks.
 - Real image filenames are passed so the subagent uses correct paths in `sources` (no hallucination).
 - **Keep model warm (subagent path only):** The cache flag `defaults.agent_has_vision: True` plus the task override for `image_ingest` keep the VL model loaded between subagent calls. Each subsequent call reuses the warm model (~10-20s) instead of cold starting (~60-90s). If the model is unloaded (e.g., after a long pause), accept one cold start, then subsequent calls will be fast.
 
-5. **Create notes from analysis:**
-- Generate a unique output filename for this session to avoid stale cache contamination: `VL_OUTPUT_FILE="/tmp/vl_wiki_notes_$(date +%s).md"`
-- **Subagent path:** Parse `$VL_OUTPUT_FILE` (split on `---NOTE_BOUNDARY---`). For each note: use the `obsidian_write` tool with `note="$WIKI_FOLDER/<Note Name>.md"`, `content="<full note text>"` (including YAML frontmatter), and `vault="<vault-name>"`. Replace `$WIKI_FOLDER` with config's `tag_routing` value. Reference the image file path in source arrays using a path from config's `raw_paths` (e.g., `$RAW_PATH/image-name.png`).
-- **Direct path:** You analyzed the image yourself — write each note directly with `obsidian_write` (or `obsidian_append` for updates), using the same frontmatter schema and output format rules.
+VL output flows through the **Consolidate** step (below) before any notes are written. Do NOT write VL output directly to disk — consolidate evaluates merge/split decisions and produces a decision document that you execute.
 
 **No VL model found:** If discovery returns no `provider`/`model_id`, and you do not have VL capabilities yourself, inform the user: "No vision-capable model is available. Image processing will be skipped — markdown sources can still be ingested." Do NOT continue silently.
 
 **Cold-start warning (subagent path only):** The subagent's VL model load takes ~60-90s (cold start on local engine). The subagent itself may take 30–120s more for inference + note generation. Use `async: true` if you want to continue other work while waiting.
 
 **Verbose output handling (subagent path only):** If the subagent's output in `$VL_OUTPUT_FILE` contains verbose reasoning or preamble text instead of clean `---NOTE_BOUNDARY---` separated notes, extract the note drafts from within (they appear as structured markdown blocks with `---YAML---` frontmatter) or rewrite them manually based on the VL analysis. The `llm-wiki-vl` skill enforces clean output but cannot guarantee it for all VL models.
+
+---
+
+### Consolidate — Evaluate VL Output Before Writing Notes
+**Action:** After all VL subagents complete, spawn a consolidation subagent with the `llm-wiki-consolidate` skill. This step determines which VL outputs become notes, which should be merged or updated, and which need human review.
+
+**Preparation:** Before spawning consolidate, strip VL metadata lines from `$VL_OUTPUT_FILE` so the consolidator reads clean note text:
+- **Metadata pattern:** Lines matching `^---(SOURCE_NOTE|IMAGE_INDEX|CONSOLIDATION_CONFIDENCE|CONSOLIDATION_REASON):\s*.+$`
+- **Action:** Remove matching lines from the file. These metadata fields are passed separately to consolidate (not embedded in note text).
+- **Graceful fallback:** If no metadata lines found, proceed normally — consolidate uses its own rules for evaluation.
+- **Edge case:** Metadata values may contain colons (e.g., `SOURCE_NOTE: tutorial-install.md`). The regex handles this via greedy capture after the first colon.
+
+**Spawn consolidate subagent:**
+```bash
+subagent({
+  agent: "default",
+  task: "Evaluate VL output and source mapping. Produce a consolidated decision document.",
+  skill: "llm-wiki-consolidate",
+  output: "$CONSOLIDATE_OUTPUT_FILE"
+})
+```
+
+**Context to pass:** The orchestrator provides the consolidate subagent with:
+- `$VL_OUTPUT_FILE`: Path to VL output (already stripped of metadata lines)
+- Source mapping: Which raw source file each image came from (from Step 0 discovery)
+- Pre-grouping hints: Filename pattern heuristics (sequential numbering → same group), batch ID
+- Optional catalog context: List of existing topic titles in the target vault (for R5: detect existing topics)
+
+**Read decision document:** After consolidate completes, read `$CONSOLIDATE_OUTPUT_FILE` to get:
+- `notes_written`: Notes that should be created (use `obsidian_write`)
+- `notes_updated`: Existing notes to append content to (use `obsidian_append`)
+- `ambiguous_cases`: Cases consolidate couldn't resolve confidently — review and decide manually
+- `summary`: Quick status for progress tracking (`total_vl_outputs_evaluated`, `notes_created`, `notes_updated`, etc.)
+
+**Execute decisions:** For each entry in the decision document:
+- `notes_written` → call `obsidian_write` with path, tags, topics from the entry
+- `notes_updated` → call `obsidian_append` with path and new content from VL output
+- `ambiguous_cases` → review each case, decide: merge, keep separate, or reject. Record your decision.
+
+**Key constraint:** Consolidate does NOT write notes to disk — it only produces the decision document. You (the orchestrator) execute all writes via `obsidian_write`/`obsidian_append`. This maintains vault isolation and gives you full control over what gets written.
+
+---
 
 ### Step 1 — Clean & Store Raw Source
 **Action:** Write cleaned Markdown into the vault's configured raw paths (from config `raw_paths`) using the native tools. Use the first writable path in the list (e.g., `Raw/Sources/`). **Skip this step for image files** — they bypass cleaning entirely and go from VL analysis (Step 0) directly to Steps 2–9.
@@ -437,6 +484,10 @@ Source files preserve ALL factual content from the original. They are NOT summar
 **⚠️ RULE: Never write a one-off script for editorial cleaning.** Scripts are only safe for deterministic, pattern-based transforms. Writing scripts that make content decisions risks losing substantive material and adding hidden state.
 
 **⚠️ CRITICAL: Always read the full file before editing.** Never use line-index slicing (e.g., `lines[13:]`) without first verifying the file structure. Frontmatter boundaries vary by source — always find `---` delimiters programmatically or visually before assuming positions.
+
+**⚠️ Empty-after-clean guard:** Before removing image embeds, check if the file body contains ONLY image embeds and no substantive text. If removing all `![](...)` would leave the file with only frontmatter:
+- **If `--keep-images` flag is set:** DO NOT remove embeds. Skip cleaning and route this source to VL processing (see Image-only markdown detection above).
+- **If `--keep-images` is NOT set:** Skip this source entirely and log "skipped (image-only, --keep-images not set)". Do NOT delete the file — move it to a separate location for manual review if needed.
 
 **What to remove (deterministic):** timestamps (`**0:08** ·`, `01:10 Chapter`), `[music]`/`[snorts]` markers, promo lines (subscribe prompts, Kickstarter/Discord/Steam links, "link in description"), image embeds (`![](...)`).
 **What to keep (source-faithful): ALL factual content.** Quotes, data points, technical explanations, paper names/authors/institutions/dates, quantitative results (accuracy numbers, benchmarks), core arguments and conclusions. Preserve every fact from the original.
@@ -491,7 +542,20 @@ Open only the most relevant notes — not all Raw context. Understand what alrea
 - Identify if a note should be **updated** (add source references) vs. created new
 - Find existing wikilinks to connect into
 
-### Step 4 — Create or Update Wiki Notes
+### Step 4 — Pre-Write Isolation Check
+**Action:** Before calling `obsidian_write` for any compiled note, verify isolation and provenance. This check prevents cross-source contamination (content from Source A bleeding into notes written for Source B) and ensures all wikilinks resolve within the target vault only.
+
+**Run before every `obsidian_write` call:**
+1. **Source derivation check:** Verify all body content in the note derives ONLY from the declared source(s). No content should originate from a different raw file. If processing multiple sources in parallel, confirm each note's text matches its own source — not a sibling source.
+2. **Wikilink scope check (C12 pre-check):** Scan all wikilinks in the note's frontmatter and body. Every `[[wikilink]]` must resolve within this vault's `wiki_root`. If any link points outside the current vault, FIX before writing.
+3. **Sources array validation:** Verify `sources:` in frontmatter contains ONLY wikilinks to raw sources from the current batch. No stale or cross-vault source paths allowed.
+4. **Template compliance:** Confirm the note starts from the correct vault template (read in Step 5's pre-step). All required sections (`## Related`, `## Sources`) are present. Frontmatter arrays use block-array syntax (not scalar).
+
+**If any check fails:** Do NOT call `obsidian_write`. Fix the issue, re-verify, then proceed.
+
+**This check is lightweight:** It uses `grep` on the note content you just prepared — no tool calls, no external reads. It takes seconds and prevents catalog corruption from cross-source contamination.
+
+### Step 5 — Create or Update Wiki Notes
 **Action:** Use native tools to create focused wiki notes in the correct folder per tag routing.
 
 **MANDATORY: Read template before writing.** Every new note MUST start from the corresponding vault template. This ensures consistent frontmatter, required sections (`## Related`, `## Sources`), and proper array formatting.
@@ -633,9 +697,6 @@ This is a **blocking failure** — notes with empty sources will fail lint and c
 If you ever see escaped quotes (`\"`) in the YAML that don't match the actual filename on disk, fix them before running lint. This was a historical issue with `obsidian_write` (now resolved) — it previously escaped straight quotes in YAML while the filesystem stored curly/apostrophe characters. See **Unicode normalization** above for details.
 
 **To update an existing note:** Use `obsidian read path="..." vault="<vault-name>"` to get current content. Append new body sections with the `obsidian_append` tool (`note="..."`, `content="<new content>"`, `vault="<vault-name>`). For frontmatter updates — including single-value fields like `source_count` and list properties like `sources` — use the `obsidian_write` tool with full note content (read → modify frontmatter in YAML → write back). The `obsidian property:set` command does not support append semantics for list-type properties (it replaces the entire list), making it unreliable for adding sources or topics to existing notes.
-
-### Step 5 — (Integrated into Steps 1 & 4)
-Source links are added as part of note creation/updates. The `sources` array in frontmatter contains wikilinks to Raw sources, and `source_count` must equal the number of entries.
 
 ### Step 6 — Validate with Wiki Tool
 **Action:** Run build, lint, and source-lint to enforce the wiki's schema contract.
