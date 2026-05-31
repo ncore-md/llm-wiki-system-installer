@@ -33,16 +33,27 @@ Think of it as a **knowledge base framework** that lives alongside Obsidian: the
 
 ### Installation (Git)
 
+#### Step 1: Get the installer to your project root
+
+**Option A — Git clone:**
+
 ```bash
-# Clone or download the installer package to your project root:
 git clone <installer-repo-url> llm-wiki-system-installer
+```
 
-# Or extract the bundled folder:
+**Option B — Extract bundled archive:**
+
+```bash
 tar -xzf llm-wiki-system-install.tar.gz
+```
 
-# Run the setup wizard:
+#### Step 2: Run the setup wizard
+
+```bash
 bash llm-wiki-system-installer/scripts/setup-wizard.sh
 ```
+
+The wizard creates your vault structure, copies skills and tooling into the vault, installs git hooks (pre-commit + pre-push), registers the vault path, and validates with an initial build.
 
 ### One-Liner for Humans & Agents
 
@@ -50,8 +61,6 @@ bash llm-wiki-system-installer/scripts/setup-wizard.sh
 |------|-------------------|
 | **Human (interactive)** | `bash llm-wiki-system-installer/scripts/setup-wizard.sh` → choose mode, select vault |
 | **Agent (non-interactive)** | `export SETUP_MODE=1 && export SETUP_VAULT_NAME="MyWiki" && bash llm-wiki-system-installer/scripts/setup-wizard.sh` |
-
-The wizard creates the full directory structure, copies skills and tooling into your vault, installs git hooks (pre-commit + pre-push), registers the vault path, and validates with an initial build.
 
 ---
 
