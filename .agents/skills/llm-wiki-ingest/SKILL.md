@@ -162,27 +162,15 @@ Run these from the wiki root directory (the same directory that contains `AGENTS
 
 **Multi-vault note:** When multiple vaults are selected, each is an independent repo. Steps 0–9 run completely for the first vault before moving to the next — no shared state, no cross-vault references. If Step 1 involves a new source (URL/file) provided by the user, that same cleaned content is written to each vault's first configured raw path (from config `raw_paths`).
 
-### Mandatory Checklist — Execute Before Proceeding to Next Step
-**Do not skip any item.** Each check prevents a known failure mode. Run `grep` commands on the files you just wrote — do not trust that a write "looked right."
+### Pre-flight Constraints — Execute Before Any Step
+**These are mandatory gates. Do not skip.** Each prevents a known failure mode.
 
-| # | Check | Command / Action |
-|---|-------|------------------|
-| C1 | **Read config for ALL paths** before writing anything | `python3 scripts/wiki_shared.py config --force` — store values in variables (`RAW_PATH`, `WIKI_FOLDER`, etc.) |
-| C2 | **Pre-write YAML verification** — confirm frontmatter has real values before calling write tool | Visually inspect: `sources:` must have entries (quoted wikilinks), `topics:` must have ≥1 plain text topic title; `tags:` must be array |
-| C3 | **Post-write re-read** — verify file has both frontmatter AND body content after every write |
-| C11 | **Source body integrity** — verify cleaned source preserved full content (not truncated) | Compare line count before/after cleaning. If body dropped >50% of original lines, RE-DO with in-context editing (no script). |
-| C0 + C11 | **Combined read-back** — after cleaning, verify BOTH: (a) no timestamp/promo/image patterns remain (`grep '\*\*[0-9]' file` must return 0), AND (b) line count preserved within tolerance | Read first and last 50 lines of the cleaned file. Confirm content flows naturally with no artifacts.
-| C4 | **Sources hard gate** — block if any note has empty `sources:` array | `grep -r 'sources: \[\]' <WIKI_FOLDER>/ — if any output, FIX immediately before proceeding |
-| C5 | **Array format verification** — block if any multi-value field uses scalar form | `grep -A2 'sources:' <WIKI_FOLDER>/*md — must show block-array format, not scalar |
-| C6 | **Topics required** — concept/entity notes must have ≥1 plain text topic title (from parsed rules). NOT wikilinks — Obsidian renders `- [[wikilink]]` in YAML frontmatter as triple brackets. Use raw title text only (e.g., `- Voxel Game Development`). | `grep -A2 'topics:' <WIKI_FOLDER>/*md — must have at least one plain text entry, no [[ ]] brackets |
-| C8 | **Required sections** — every compiled note must have `## Related` AND `## Sources` in body | `grep -c '^## Related\|^## Sources' <WIKI_FOLDER>/<Note Name>.md — must return count of required sections |
-| C9 | **On-disk filename match** — verify frontmatter source paths match actual filenames on disk (especially for apostrophes, curly quotes) | `ls <RAW_PATH>/ | grep <keyword>` — compare against frontmatter |
-| C0 | **Read-back source body** — after cleaning, explicitly read back the cleaned file and verify NO timestamp patterns (`**X:XX** ·`, `HH:MM:SS - Title`), promo lines, or image embeds remain | Read first 50 and last 50 lines of the cleaned source file. If any timestamp/promo pattern found, clean again before proceeding to Step 2 |
-| C10 | **Pre-commit lint** — run `lint` + `source-lint` explicitly before asking user to commit | `python3 scripts/wiki_tool.py lint && python3 scripts/wiki_tool.py source-lint` |
-| C12 | **Cross-reference isolation** — verify all wikilinks in newly written notes resolve within the target vault's wiki_root | Config-driven: `efficient` mode (default, run once after all Steps 0–9 complete for the vault) or `strict` mode (run after every individual note write). Set via `defaults.isolation_mode: "efficient"` or `"strict"` in config.json. Scan all notes in Wiki/ directory — if any wikilink does not resolve within this vault's wiki_root, FIX before proceeding. |
+| Gate | What to verify | Command / Action |
+|------|---------------|------------------|
+| **CFG-1** | Config loaded before any write | `python3 scripts/wiki_shared.py config --force` — store paths in variables |
+| **CFG-2** | Vault rules parsed (max_topics, required_sections, allowed_tags) | From AGENTS.md checklist section |
 
-**Hard rule:** If C0 triggers (timestamp/promo patterns remain) or C4 triggers (empty sources), do NOT proceed to Step 2. Fix immediately, re-verify, then continue.
-
+---
 ### Step 0 - Check for Pending Sources
 **Action:** Before asking the user for a source, discover vault config and check each validated vault's raw paths for files that need processing.
 
@@ -426,6 +414,8 @@ VL output flows through the **Consolidate** step (below) before any notes are wr
 ### Consolidate — Evaluate VL Output Before Writing Notes
 **Action:** After all VL subagents complete, spawn a consolidation subagent with the `llm-wiki-consolidate` skill. This step determines which VL outputs become notes, which should be merged or updated, and which need human review.
 
+**⚠️ SKIP GATE:** If no VL images were found during Step 0 discovery AND `$VL_OUTPUT_FILE` is empty or missing, skip consolidation entirely and proceed directly to Steps 1–9. Do NOT spawn a consolidate subagent when there is no VL output to evaluate.
+
 **Preparation:** Before spawning consolidate, strip VL metadata lines from `$VL_OUTPUT_FILE` so the consolidator reads clean note text:
 - **Metadata pattern:** Lines matching `^---(SOURCE_NOTE|IMAGE_INDEX|CONSOLIDATION_CONFIDENCE|CONSOLIDATION_REASON):\s*.+$`
 - **Action:** Remove matching lines from the file. These metadata fields are passed separately to consolidate (not embedded in note text).
@@ -465,6 +455,11 @@ subagent({
 
 ### Step 1 — Clean & Store Raw Source
 **Action:** Write cleaned Markdown into the vault's configured raw paths (from config `raw_paths`) using the native tools. Use the first writable path in the list (e.g., `Raw/Sources/`). **Skip this step for image files** — they bypass cleaning entirely and go from VL analysis (Step 0) directly to Steps 2–9.
+
+**⚠️ GATE — Source Body Integrity (C0 + C11):** After cleaning, you MUST verify:
+- **Read back the cleaned file** (first 50 and last 50 lines). Confirm no timestamp patterns (`**X:XX** ·`, `HH:MM:SS - Title`), promo lines, or image embeds remain.
+- **Line count preserved within tolerance**: If body dropped >50% of original lines, RE-DO cleaning with in-context editing (no script). Only deterministic transforms allowed: remove timestamps, chapter markers, `[music]` fillers, promo links.
+- **Hard fail**: If C0 triggers (timestamp/promo patterns remain) or body integrity fails, do NOT proceed to Step 2. Fix immediately, re-verify.
 
 **⚠️ CORE PRINCIPLE: Sources are source-faithful. Do NOT summarize, distill, or editorialize.**
 Source files preserve ALL factual content from the original. They are NOT summaries, key-point lists, or distilled notes — that's what compiled Wiki notes (Steps 2–9) are for. Source cleaning is about removing noise, not content.
@@ -733,6 +728,14 @@ Only log if meaningful changes were made — not for every minor update. The ent
 
 ### Step 9 — Commit (Git)
 **Action:** Use git to commit all changes. The pre-commit hook automatically runs `doctor + build + lint` as a final safety gate.
+
+**⚠️ GATE — Pre-commit explicit lint (C10):** Before running `git commit`, explicitly run the validation scripts. Do NOT rely on pre-commit hooks alone — they are a safety net, not your primary quality gate.
+
+```bash
+python3 scripts/wiki_tool.py build && python3 scripts/wiki_tool.py lint && python3 scripts/wiki_tool.py source-lint
+```
+
+Only proceed to `git add -A && git commit` if ALL three checks pass. If any fail, fix the issues and re-run.
 
 ```bash
 git add -A && git commit -m "<message>"
