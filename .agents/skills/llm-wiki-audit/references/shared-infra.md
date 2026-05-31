@@ -48,16 +48,18 @@ This skill is **vault-agnostic**. It works with any Obsidian vault that contains
 ## Vault Isolation Rule (Required Before Moving to Next Vault)
 
 After processing each vault, CLEAR ALL config-derived variables before moving to the next.
-Never reuse a variable from a previous vault without re-read verification.
+The project config file (`.llm-wiki-config/config.json`) is shared across all vaults —
+variables set for one vault must not be reused when processing another.
 
 **Variables to clear:** `RAW_PATH`, `WIKI_FOLDER`, `TEMPLATES_DIR`, `TAG_ROUTING`,
 `__WIKI_DIR__`, `__RAW_PATHS__`, topic title lists, catalog search results.
 
 **Before processing the next vault:**
-1. Re-read config using `wiki_shared.py config --force` (disregard cached values)
-2. Re-resolve `wiki_root` using `wiki_shared.py resolve-path <vault-name>`
-3. Re-collect topic titles from the NEW vault's `catalog.jsonl` (do not reuse old list)
-4. Re-scan raw paths for the NEW vault's `raw_paths` (do not reuse old scan)
+1. Extract the new vault's settings from config (use `wiki_shared.py resolve-path <vault-name>`
+   to get its `wiki_root` and raw paths — do NOT reuse previous vault's values)
+2. Re-collect topic titles from the NEW vault's `catalog.jsonl` (read from its own wiki_root,
+   not a previously cached path)
+3. Re-scan raw paths from the NEW vault's config entry (do not reuse previous scan results)
 
 **Verification:** Before writing any note, confirm the target path exists within
 the current vault's `wiki_root`. If a path does not resolve, abort and report — do NOT guess.

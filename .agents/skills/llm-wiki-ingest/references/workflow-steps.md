@@ -48,20 +48,22 @@ PYEOF` | **Efficient mode (default):** Run once after all Steps 0–9 complete f
 ### Step 0 - Check for Pending Sources
 **Action:** Before asking the user for a source, discover vault config and check each validated vault's raw paths for files that need processing.
 
-**Per-Vault Variable Re-Collection:** At the beginning of Step 0 for each vault, explicitly re-collect ALL variables from that vault's config. Do NOT reuse values from a previous vault.
+**Per-Vault Variable Re-Collection:** At the beginning of Step 0 for each vault, explicitly re-collect ALL variables from that vault's settings in the shared project config. Do NOT reuse values from a previous vault.
 
-**Config Discovery:** Before scanning, discover the vault's config to get its permissions and raw paths:
+**Config Discovery:** Before scanning, read the shared project config to get permissions and raw paths for the current vault:
 ```bash
 cd <wiki-root> && python3 scripts/wiki_shared.py config --force 2>&1
 ```
 This returns JSON with `permissions` (e.g., `["read", "write", "ingest"]`) and `raw_paths` (e.g., `["Raw/Source", "Raw/Sources"]`). If the vault has only `"read"` permission, skip all write/ingest operations — report "Vault is read-only (no ingest/write permission)" and move to the next vault.
 
 **Per-vault re-collection (after config discovery, before any other Step 0 action):**
-1. **Re-resolve wiki root:** `cd <wiki-root> && python3 scripts/wiki_shared.py resolve-path "<vault-name>" 2>&1`
-2. **Re-collect topic titles** from THIS vault's `catalog.jsonl` (do not reuse old list)
-3. **Re-scan raw paths** from THIS vault's `raw_paths` (do not reuse old scan)
+1. **Resolve wiki root:** `cd <wiki-root> && python3 scripts/wiki_shared.py resolve-path "<vault-name>" 2>&1`
+   — extract the new vault's `wiki_root` from config, do NOT reuse previous vault's path
+2. **Re-collect topic titles** from THIS vault's `catalog.jsonl` (read from its own wiki_root,
+   not a previously cached path)
+3. **Re-scan raw paths** from THIS vault's config entry (do not reuse previous scan results)
 
-**Hard rule:** If `__WIKI_DIR__` or `__RAW_PATHS__` were populated from a previous vault's config, they are INVALID for the current vault. Always re-collect after switching vaults.
+**Hard rule:** If `__WIKI_DIR__` or `__RAW_PATHS__` were populated from a previous vault's settings, they are INVALID for the current vault. Always re-collect after switching vaults.
 
 **Load Vault Rules:** Parse structured rules from AGENTS.md (the `---checklist---` section) to get vault-specific constraints:
 ```bash
