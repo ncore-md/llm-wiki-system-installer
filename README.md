@@ -12,11 +12,11 @@ Turns raw source material into organized, queryable knowledge that AI agents and
 2. [What Gets Installed](#what-gets-installed)
 3. [First Run Setup](#first-run-setup)
 4. [Daily Workflow](#daily-workflow)
-5. [Security & Compliance](#security--compliance) ⭐ **NEW**
+5. [Security & Compliance](#security--compliance)
 6. [Architecture Overview](#architecture-overview)
-7. [Command Reference](#command-reference) ⭐ **NEW**
+7. [Command Reference](#command-reference)
 8. [The Seven Skills](#the-seven-skills)
-9. [Troubleshooting](#troubleshooting) ⭐ **NEW**
+9. [Troubleshooting](#troubleshooting)
 10. [FAQ & Notes](#faq--notes)
 
 ---
@@ -25,11 +25,34 @@ Turns raw source material into organized, queryable knowledge that AI agents and
 
 LLM Wiki turns raw source material into organized, queryable knowledge that AI agents and humans can use. It manages a pipeline from raw sources (articles, notes, transcripts) through compilation into structured Wiki notes with strict quality gates — every commit runs build + lint checks, and pushes to public repos are scanned for secrets before they leave your machine.
 
-Think of it as a **knowledge base framework** that lives alongside Obsidian: the `.llm-wiki/` directory holds skills, tooling, and compiled notes as a shared system; each project declares its own vaults and permissions in `.llm-wiki-config/config.json`.
+### Where it fits
+
+LLM Wiki is a **knowledge layer** that sits alongside your project. You put it in any git repo — a codebase, a research workspace, an AI agent project — and it gives you:
+
+- **Ingest** (`llm-wiki-ingest`): Drop in URLs, articles, or notes → they get compiled into structured Wiki entries
+- **Query** (`llm-wiki-query`): Ask questions → it searches compiled knowledge and synthesizes answers
+- **Lint** (`llm-wiki-lint`): Validates note quality before every commit — blocks bad frontmatter, broken links
+- **Maintain** (`llm-wiki-maintain`): Periodic health checks — rebuilds the catalog, verifies source coverage
+- **VL** (`llm-wiki-vl`): Vision language — turns images into wiki notes (subagent-only, triggered by ingest)
+- **Setup** (`llm-wiki-setup`): One-time vault configuration — discovers your Obsidian vaults, writes config
+- **Audit** (`llm-wiki-audit`): Security scanning — catches secrets and compliance issues before push
+
+### How it works with other skills
+
+LLM Wiki is designed to **coexist** in a workspace that may already have other skills or tools:
+
+- If you use **Obsidian** for knowledge management, LLM Wiki works alongside it — the `.llm-wiki/` directory lives as a sibling to your vault, and all operations go through the Obsidian CLI
+- If you use **other AI agent skills** (code generation, testing, documentation), LLM Wiki acts as a shared memory layer — agents query the wiki before creating new content, avoiding redundant work
+- If you're building an **agentic pipeline**, the skills plug in as steps: ingest → compile → query, with lint and audit gates at commit/push time
+- The `.llm-wiki-config/` directory is **per-project**, so the same wiki system can serve multiple projects with different vault declarations and permissions
+
+The shared `.llm-wiki/` directory holds skills, tooling, and compiled notes as a read-only framework. Each project declares its own vaults and permissions in `.llm-wiki-config/config.json`. This separation means you can drop LLM Wiki into any existing project without touching its structure.
 
 ---
 
 ## 2. Quick Start
+
+> **TL;DR:** Clone the installer, run one command, and you have a working knowledge base with git hooks. Setup takes about 2 minutes.
 
 ### Installation
 
@@ -65,6 +88,8 @@ The wizard creates your vault structure, copies skills and tooling into the vaul
 ---
 
 ## 3. What Gets Installed
+
+> **TL;DR:** You get a shared wiki system (`.llm-wiki/`) with skills, tooling, and templates — plus a per-project config (`.llm-wiki-config/`) that declares which vaults are available and what each can do.
 
 ```
 <project-root>/                          ← your project folder (CWD)
@@ -109,6 +134,8 @@ The wizard creates your vault structure, copies skills and tooling into the vaul
 ---
 
 ## 4. First Run Setup
+
+> **TL;DR:** The wizard creates your vault structure and installs git hooks. Then the `llm-wiki-setup` skill discovers your Obsidian vaults and writes a per-project config file. That's it — you're ready to ingest.
 
 ### Step 1: Run the Wizard
 
@@ -177,6 +204,8 @@ python3 scripts/wiki_shared.py discover
 
 ## 5. Daily Workflow
 
+> **TL;DR:** Your day-to-day is a simple loop: add sources → ingest them into Wiki notes → query the catalog before creating new content → lint on every commit. Maintenance runs weekly or before important changes.
+
 The standard knowledge management loop: **ingest → compile → query → lint**
 
 ```
@@ -223,7 +252,9 @@ python3 scripts/wiki_tool.py search-catalog --query "your topic"
 
 ---
 
-## 6. Security & Compliance ⭐ **NEW**
+## 6. Security & Compliance
+
+> **TL;DR:** Before every push to a public repo, LLM Wiki scans for secrets (API keys, tokens) and checks wiki health. If you're working on a private repo, just `touch .private-repo` to skip the scan. The hooks run automatically — you can't push past them.
 
 LLM Wiki includes a built-in security gate that runs automatically before you push code to remote repositories. This is critical for wikis that may reference external sources, contain API keys in notes, or inadvertently expose sensitive information.
 
@@ -287,7 +318,9 @@ Both hooks are installed automatically by the setup wizard. They **block** on fa
 
 ---
 
-## 7. Command Reference ⭐ **NEW**
+## 7. Command Reference
+
+> **TL;DR:** Three families of commands: `wiki_tool.py` for build/lint/scan, `wiki_shared.py` for config/vaults/discovery, and slash commands (`/llm-wiki-*`) that trigger skills directly. Use the CLI when automating, slash commands when working interactively.
 
 ### wiki_tool.py Commands
 
@@ -324,6 +357,8 @@ Both hooks are installed automatically by the setup wizard. They **block** on fa
 ---
 
 ## 8. Architecture Overview
+
+> **TL;DR:** The system is split into two layers: `.llm-wiki/` (shared, read-only framework with skills and tooling) and `.llm-wiki-config/` (per-project, writable config). Skills discover vaults by walking up from the wiki root to find their project's config file.
 
 ### Directory Layout: Shared System vs Project Config
 
@@ -438,6 +473,8 @@ Discover actual routing for a vault: `python3 scripts/wiki_shared.py config --fo
 
 ## 9. The Seven Skills
 
+> **TL;DR:** Each skill has a single job and plugs into the workflow: `ingest` brings in sources, `query` answers questions, `lint` validates quality, `maintain` runs health checks, `vl` processes images, `setup` creates config, and `audit` scans for security issues. All skills auto-detect missing config and offer to run setup.
+
 ### 1. `llm-wiki-ingest` — Create & Update Notes
 
 **The orchestrator.** Handles the full pipeline from raw source to committed wiki note.
@@ -540,6 +577,8 @@ Step 9: Git commit (pre-commit hook runs safety checks)
 
 ## 10. Troubleshooting ⭐ **NEW**
 
+> **TL;DR:** Most issues are config-related (missing `config.json`), Obsidian not running, or hook failures from bad frontmatter. The pre-flight checklist at the bottom helps catch problems before they happen.
+
 ### Common Issues
 
 | Problem | Cause | Fix |
@@ -575,6 +614,8 @@ python3 scripts/wiki_tool.py doctor && python3 scripts/wiki_tool.py lint
 ---
 
 ## 11. FAQ & Notes
+
+> **TL;DR:** Quick answers to common questions: per-project config, multi-vault support, private repo handling, installer cleanup, and the difference between lint (per-commit) and maintain (periodic).
 
 ### Is `.llm-wiki-config/` shared across projects?
 **No.** It's per-project. Each project declares its own vaults and permissions in `.llm-wiki-config/config.json`. The shared system lives only in `.llm-wiki/`.
