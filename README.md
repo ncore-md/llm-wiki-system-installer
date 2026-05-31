@@ -33,10 +33,24 @@ Think of it as a **knowledge base framework** that lives alongside Obsidian: the
 
 ### Installation
 
-#### Step 1: Clone the installer to your project root
+#### One-liner (clone + run setup)
+
+```bash
+git clone https://github.com/ncore-md/llm-wiki-system-installer.git && cd llm-wiki-system-installer && bash scripts/setup-wizard.sh
+```
+
+#### Step-by-step
+
+**Step 1: Clone the installer to your project root:**
 
 ```bash
 git clone https://github.com/ncore-md/llm-wiki-system-installer.git
+```
+
+**Step 2: Run the setup wizard:**
+
+```bash
+cd llm-wiki-system-installer && bash scripts/setup-wizard.sh
 ```
 
 #### Step 2: Run the setup wizard
