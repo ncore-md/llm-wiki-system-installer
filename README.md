@@ -56,7 +56,7 @@ This directory is the shared wiki system — skills, tooling, and compiled notes
 
 ---
 
-## The Six Skills
+## The Seven Skills
 
 ### 1. `llm-wiki-ingest` — Create & Update Notes
 

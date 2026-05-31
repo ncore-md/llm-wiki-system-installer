@@ -1,11 +1,11 @@
 #!/usr/bin/env bash
 # LLM Wiki Setup Wizard — Initialize a clean knowledge base in an Obsidian vault.
-# Self-contained: copies system files from sibling directories within this LLM-wiki-system-install/ folder.
-# Usage (interactive): bash LLM-wiki-system-install/scripts/setup-wizard.sh
+# Self-contained: copies system files from sibling directories within this llm-wiki-system-installer/ folder.
+# Usage (interactive): bash llm-wiki-system-installer/scripts/setup-wizard.sh
 # Usage (agent/non-interactive): see environment variables below.
 #
-# Portable — send the entire LLM-wiki-system-install/ folder to another user. They extract it and run:
-#   bash LLM-wiki-system-install/scripts/setup-wizard.sh
+# Portable — send the entire llm-wiki-system-installer/ folder to another user. They extract it and run:
+#   bash llm-wiki-system-installer/scripts/setup-wizard.sh
 
 set -e
 RED='\033[0;31m'
@@ -25,7 +25,7 @@ SETUP_SRC="$SCRIPT_DIR/.."
 
 if [ ! -d "$SETUP_SRC" ]; then
     error "Setup folder not found at $SETUP_SRC"
-    info "Extract the LLM-wiki-system-install/ folder and run from there."
+    info "Extract the llm-wiki-system-installer/ folder and run from there."
     exit 1
 fi
 
@@ -81,16 +81,16 @@ GUIDE
 
     Optional env vars:
       SETUP_VAULT_PATH="/path"  # override default vault location
-                                # Default: .llm-wiki/ sibling to LLM-wiki-system-install/
+                                # Default: .llm-wiki/ sibling to llm-wiki-system-installer/
 
     Example — create new vault:
       export SETUP_MODE=1
       export SETUP_VAULT_NAME="MyWiki"
-      bash LLM-wiki-system-install/scripts/setup-wizard.sh
+      bash llm-wiki-system-installer/scripts/setup-wizard.sh
 
     Example — apply to existing vault:
       export SETUP_MODE=2
-      bash LLM-wiki-system-install/scripts/setup-wizard.sh   # prompts for vault selection
+      bash llm-wiki-system-installer/scripts/setup-wizard.sh   # prompts for vault selection
 
 AGENTS
 }
@@ -158,7 +158,7 @@ print_guide
 if [ -z "$MODE" ] && [ ! -t 0 ]; then
     error "No SETUP_MODE set and not running in a terminal."
     info "Agents: use env vars (SETUP_MODE, SETUP_VAULT_NAME) and run non-interactively."
-    info "Example: export SETUP_MODE=1 && bash LLM-wiki-system-install/scripts/setup-wizard.sh"
+    info "Example: export SETUP_MODE=1 && bash llm-wiki-system-installer/scripts/setup-wizard.sh"
     exit 1
 fi
 
@@ -203,11 +203,11 @@ if [[ "$MODE" == "1" ]]; then
     VAULT_PATH="${VAULT_PATH:-}"
     if [ -z "$VAULT_PATH" ]; then
         SETUP_PARENT="$(cd "$SETUP_SRC" && pwd)"
-        # Check if LLM-wiki-system-install/ lives inside a .llm-wiki/ folder → use it as vault root
+        # Check if llm-wiki-system-installer/ lives inside a .llm-wiki/ folder → use it as vault root
         if [ -d "$SETUP_PARENT/.llm-wiki" ]; then
             VAULT_PATH="$SETUP_PARENT/.llm-wiki"
         else
-            # Otherwise create .llm-wiki/ sibling to LLM-wiki-system-install/
+            # Otherwise create .llm-wiki/ sibling to llm-wiki-system-installer/
             VAULT_PATH="$SETUP_PARENT/../.llm-wiki/$VAULT_NAME"
         fi
     fi
@@ -274,7 +274,7 @@ info "This will create the LLM Wiki system in: ${VAULT_PATH}"
 echo ""
 info "What will be created:"
 echo "   Directory structure: Raw/, Wiki/ (Topics, Concepts, Entities, Projects, Logs), Schema/, _templates/, scripts/, .agents/skills/"
-echo "   Files: AGENTS.md, welcome note, 6 templates, schema files, wiki_tool.py, audit_public.py"
+echo "   Files: AGENTS.md, welcome note, 7 templates, schema files, wiki_tool.py"
 echo "   Pre-commit hook enforcing validation on every commit"
 
 if [ -z "$CONFIRM" ]; then
@@ -287,7 +287,7 @@ if [[ "$CONFIRM" != "y" && "$CONFIRM" != "Y" ]]; then
     exit 0
 fi
 
-# ─── Setup Function (Self-Contained: copies from bundled LLM-wiki-system-install/ folder) ──
+# ─── Setup Function (Self-Contained: copies from bundled llm-wiki-system-installer/ folder) ──
 setup_vault() {
     local TARGET_DIR="$1"
 
@@ -295,7 +295,7 @@ setup_vault() {
 
     # ── Create directory structure
     info "Creating directory structure..."
-    mkdir -p Raw/Sources Raw/Files Wiki/{Topics,Concepts,Entities,Projects,Logs} Schema _templates scripts .agents/skills/llm-wiki-ingest .agents/skills/llm-wiki-query .agents/skills/llm-wiki-lint .agents/skills/llm-wiki-maintain
+    mkdir -p Raw/Sources Raw/Files Wiki/{Topics,Concepts,Entities,Projects,Logs} Schema _templates scripts .agents/skills/llm-wiki-ingest .agents/skills/llm-wiki-query .agents/skills/llm-wiki-lint .agents/skills/llm-wiki-maintain .agents/skills/llm-wiki-audit .agents/skills/llm-wiki-setup .agents/skills/llm-wiki-vl
 
     # ── Create placeholder files
     touch Raw/Sources/.gitkeep Wiki/Topics/.gitkeep Wiki/Concepts/.gitkeep Wiki/Entities/.gitkeep Wiki/Projects/.gitkeep Wiki/Logs/.gitkeep
@@ -303,7 +303,7 @@ setup_vault() {
     # ── Copy system files from bundled setup folder
     info "Copying system files..."
 
-    # Core config (from root of LLM-wiki-system-install/)
+    # Core config (from root of llm-wiki-system-installer/)
     cp "$SETUP_SRC/.gitignore" . 2>/dev/null || true
     cp "$SETUP_SRC/AGENTS.md" . 2>/dev/null || true
     cp "$SETUP_SRC/Welcome.md" . 2>/dev/null || true
@@ -318,7 +318,7 @@ setup_vault() {
         [ -f "$s" ] && cp "$s" Schema/ 2>/dev/null || true
     done
 
-    # Scripts (wiki_tool.py, audit_public.py) — skip setup-wizard.sh
+    # Scripts (wiki_tool.py, wiki_shared.py) — skip setup-wizard.sh
     for s in "$SETUP_SRC"/scripts/*; do
         [ -f "$s" ] && [[ "$(basename "$s")" != "setup-wizard.sh" ]] && cp "$s" scripts/ 2>/dev/null || true
     done
@@ -330,9 +330,14 @@ setup_vault() {
 
     # Pre-commit hook
     mkdir -p .git/hooks 2>/dev/null || true
-    if [ -f "$SETUP_SRC"/hooks/pre-commit ]; then
-        cp "$SETUP_SRC"/hooks/pre-commit .git/hooks/pre-commit 2>/dev/null || true
-        chmod +x .git/hooks/pre-commit 2>/dev/null || true
+    # Install git hooks
+    mkdir -p .git/hooks 2>/dev/null || true
+    for hook in pre-commit pre-push; do
+        if [ -f "$SETUP_SRC"/hooks/$hook ]; then
+            cp "$SETUP_SRC"/hooks/$hook .git/hooks/$hook 2>/dev/null || true
+            chmod +x .git/hooks/$hook 2>/dev/null || true
+        fi
+    done
     fi
 
     success "Setup complete: $TARGET_DIR"
@@ -341,7 +346,7 @@ setup_vault() {
 # ─── Run Setup ────────────────────────────────────────────────────────
 setup_vault "$VAULT_PATH"
 
-# ─── Clean up LLM-wiki-system-install/ if it's inside the vault parent folder ─────
+# ─── Clean up llm-wiki-system-installer/ if it's inside the vault parent folder ─────
 clean_up_installer() {
     local SETUP_PARENT="$(cd "$SETUP_SRC" && pwd)"
     local PARENT_DIR=$(dirname "$SETUP_PARENT")

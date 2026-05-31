@@ -59,7 +59,7 @@ source_count_required: true
 | `Wiki/Logs/` | Activity logs, change records — one note per meaningful action. |
 | `Schema/` | Rules, schemas, catalog manifest files. Not user-facing notes. |
 | `_templates/` | Note templates for new content creation — do not edit without reason. |
-| `scripts/` | Tooling scripts (wiki_tool.py, audit_public.py). Do not edit without reason. |
+| `scripts/` | Tooling scripts (wiki_tool.py, wiki_shared.py). Do not edit without reason. |
 | `.agents/skills/` | Agent skill definitions (ingest, query, lint, maintain). |
 | `tutorial/` | Tutorial files and documentation. Empty until populated. |
 
@@ -184,12 +184,12 @@ Add a `.private-repo` marker file to the repo root if you want tools to skip pub
 
 ## Obsidian CLI (Optional — Requires Running Obsidian)
 
-The `obsidian` CLI (`/usr/local/bin/obsidian`) provides features no other tool can do. Only use when Obsidian is running.
+The `obsidian` CLI provides features no other tool can do. Only use when Obsidian is running.
 
 | Command | Purpose |
 |---------|--------|
-| `obsidian vault="Pi-Vault" unresolved` | Lists broken/missing wikilinks in the vault |
-| `obsidian vault="Pi-Vault" tasks` | Lists all checkbox tasks across notes |
-| `obsidian vault="Pi-Vault" daily:read` | Reads the current daily note |
+| `obsidian vault="<vault_name>" unresolved` | Lists broken/missing wikilinks in the vault |
+| `obsidian vault="<vault_name>" tasks` | Lists all checkbox tasks across notes |
+| `obsidian vault="<vault_name>" daily:read` | Reads the current daily note |
 
 > **Rule:** If Obsidian is not running, do NOT use the CLI for note CRUD — fall back to built-in `obsidian_*` functions or bash.

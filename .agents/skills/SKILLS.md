@@ -19,7 +19,7 @@ These seven skills provide a complete pipeline: from first-time setup through so
 
 ---
 
-## The Six Skills
+## The Seven Skills
 
 | Skill | Purpose | Triggered By |
 |---|---|---|

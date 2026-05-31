@@ -1,0 +1,14 @@
+# Generated artifacts (rebuildable)
+catalog.jsonl
+
+# Python cache
+__pycache__/
+*.py[cod]
+
+# Obsidian local state (keep app.json, ignore cache)
+.obsidian/cache/
+.obsidian/plugins/
+
+# OS files
+.DS_Store
+Thumbs.db

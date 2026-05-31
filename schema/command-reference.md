@@ -12,7 +12,7 @@ Related: [[AGENTS.md]]
 | `python3 scripts/wiki_tool.py lint` | Validates compiled Wiki note frontmatter, allowed tags, source links, `source_count`. |
 | `python3 scripts/wiki_tool.py source-lint` | Validates Raw source frontmatter and coverage state (processed sources must have Wiki coverage). |
 | `python3 scripts/wiki_tool.py source-delta` | Shows Raw sources not in manifest and vice versa — identifies actionable delta for ingest. |
-| `python3 scripts/audit_public.py` | Fails on secrets, local paths, private keys, plugin/cache state. For pre-push checks.
+| `python3 scripts/wiki_tool.py security-scan [--mode public|private]` | Fast secrets-only scan of tracked files. Exit 0 = clean, exit 1 = critical findings.
 
 ## Indexing & Catalog
 
@@ -51,5 +51,6 @@ python3 scripts/wiki_tool.py build && python3 scripts/wiki_tool.py lint && pytho
 python3 scripts/wiki_tool.py doctor && python3 scripts/wiki_tool.py build && python3 scripts/wiki_tool.py lint && python3 scripts/wiki_tool.py source-lint
 
 # Before pushing to a public repo:
-python3 scripts/audit_public.py
+python3 scripts/wiki_tool.py security-scan --mode public
+python3 scripts/wiki_tool.py audit --mode public
 ```

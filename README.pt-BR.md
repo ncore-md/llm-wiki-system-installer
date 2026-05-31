@@ -51,7 +51,7 @@ Após a instalação, a pasta do instalador é automaticamente removida do diret
 | `Schema/` | Regras, esquemas, definições de validação |
 | `_templates/` | Modelos de nota para novas notas Wiki |
 | `scripts/wiki_tool.py` | Ferramentas de validação (build, lint, search-catalog) |
-| `.agents/skills/` | Skills de agentes (ingest, query, lint, maintain) |
+| `.agents/skills/` | Skills de agentes (ingest, query, lint, maintain, audit, vl, setup) |
 
 ## Licença
 

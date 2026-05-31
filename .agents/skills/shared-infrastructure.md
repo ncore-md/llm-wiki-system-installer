@@ -100,7 +100,7 @@ python3 scripts/wiki_shared.py config [--force]        # Discover wiki structure
 
 | Tool | Used By | Purpose |
 |---|---|---|
-| **obsidian CLI** (`/usr/local/bin/obsidian`) | ingest, query, setup, lint, maintain | Vault CRUD via Chrome DevTools Protocol — read/write/search notes & properties. All vault file operations go through this or native `obsidian_write`/`obsidian_append`. |
+| **obsidian CLI** (`$OBSIDIAN_CLI` or `obsidian`) | ingest, query, setup, lint, maintain | Vault CRUD via Chrome DevTools Protocol — read/write/search notes & properties. All vault file operations go through this or native `obsidian_write`/`obsidian_append`. |
 | **defuddle** | ingest (Step 1 — URL cleaning) | Extract clean markdown from web pages, removing navigation/ads/clutter. Only deterministic noise removal; ALL factual content preserved in source-faithful layer. |
 | **obsidian_write / obsidian_append** (native) | ingest, query | Structured note creation — preferred over CLI for YAML frontmatter safety. Pass content as structured params, no shell escaping issues. |
 
