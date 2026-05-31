@@ -29,6 +29,7 @@ import os
 import re as _re
 import sys
 from datetime import date, datetime
+from pathlib import Path
 
 
 # ---------------------------------------------------------------------------
@@ -1408,25 +1409,37 @@ _DEFAULT_AUDIT_RULES = {
 
 
 def _load_audit_rules():
-    """Load audit rules from .llm-wiki-config/audit-rules.json or return defaults."""
-    config_dir = os.path.join(REPO_ROOT, ".llm-wiki-config")
-    rules_path = os.path.join(config_dir, "audit-rules.json")
-    if os.path.isfile(rules_path):
-        try:
-            with open(rules_path, "r", encoding="utf-8") as f:
-                user_rules = json.load(f)
-            # Merge: defaults + user overrides
-            merged = dict(_DEFAULT_AUDIT_RULES)
-            for key in ("secrets_patterns", "skip_dirs", "skip_files"):
-                if key in user_rules:
-                    merged[key] = user_rules[key]
-            for section in ("path_scan", "wiki_checks"):
-                if section in user_rules and isinstance(user_rules[section], dict):
-                    merged.setdefault(section, {})
-                    merged[section].update(user_rules[section])
-            return merged
-        except (json.JSONDecodeError, IOError):
-            pass
+    """Load audit rules by walking up from wiki_root looking for .llm-wiki-config/audit-rules.json.
+
+    Priority order (first found wins):
+      1. wiki_root/.llm-wiki-config/audit-rules.json     (vault-level, highest priority)
+      2. parent/.llm-wiki-config/audit-rules.json         (project-level)
+      3. Built-in defaults (_DEFAULT_AUDIT_RULES)          (fallback)
+
+    Returns:
+        dict with merged audit rules.
+    """
+    # Start from REPO_ROOT (wiki root) and walk up to 5 levels
+    start = Path(REPO_ROOT)
+    for dir_path in [start] + list(start.parents)[:5]:
+        rules_file = dir_path / ".llm-wiki-config" / "audit-rules.json"
+        if rules_file.is_file():
+            try:
+                with open(rules_file, "r", encoding="utf-8") as f:
+                    user_rules = json.load(f)
+                # Merge: defaults + user overrides
+                merged = dict(_DEFAULT_AUDIT_RULES)
+                for key in ("secrets_patterns", "skip_dirs", "skip_files"):
+                    if key in user_rules:
+                        merged[key] = user_rules[key]
+                for section in ("path_scan", "wiki_checks"):
+                    if section in user_rules and isinstance(user_rules[section], dict):
+                        merged.setdefault(section, {})
+                        merged[section].update(user_rules[section])
+                return merged
+            except (json.JSONDecodeError, IOError):
+                # Bad config file — skip and continue walking up
+                pass
     return dict(_DEFAULT_AUDIT_RULES)
 
 
