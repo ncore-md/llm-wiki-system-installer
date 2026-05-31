@@ -33,26 +33,10 @@ Think of it as a **knowledge base framework** that lives alongside Obsidian: the
 
 ### Installation
 
-#### Step 1: Clone or copy the installer to your project root
-
-Place the `llm-wiki-system-installer/` folder inside your project directory. You can get it by:
-
-**Git clone:**
+#### Step 1: Clone the installer to your project root
 
 ```bash
 git clone https://github.com/ncore-md/llm-wiki-system-installer.git
-```
-
-**Extract from bundled archive:**
-
-```bash
-tar -xzf llm-wiki-system-install.tar.gz
-```
-
-**Or copy from a local machine:**
-
-```bash
-cp -r /path/to/llm-wiki-system-installer ./
 ```
 
 #### Step 2: Run the setup wizard
