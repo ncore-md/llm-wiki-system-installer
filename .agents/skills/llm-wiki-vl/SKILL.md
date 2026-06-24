@@ -81,7 +81,8 @@ source_count: N
 5. **topics field must have ≥1 wikilink** — Never leave empty or null. Use exact titles from the provided topic list.
 6. **sources must use real filenames** — Never hallucinate or guess image filenames. Use only the provided list.
 7. **One concept per note** — Each note covers exactly one discrete idea or topic.
-8. **Vault-scoped references only** — Every wikilink in topics: and sources: MUST resolve to a file within the subagent's declared target vault. The input data (topic titles, image paths) already comes from a single vault's context — do not introduce cross-vault references. If you encounter an ambiguous topic title, use the exact title as provided; do not attempt to disambiguate by adding vault prefixes.
+8. **DO NOT write to disk** — Produce output ONLY as text that the orchestrator captures and writes. Never call `obsidian_write`, `obsidian_append`, or any file-writing tool. Your entire output is text — the orchestrator handles all disk writes after consolidation decisions.
+9. **Vault-scoped references only** — Every wikilink in topics: and sources: MUST resolve to a file within the subagent's declared target vault. The input data (topic titles, image paths) already comes from a single vault's context — do not introduce cross-vault references. If you encounter an ambiguous topic title, use the exact title as provided; do not attempt to disambiguate by adding vault prefixes.
 
 ## Analysis Process (Internal Only)
 1. Read the image using your `read` tool — see it directly, no encoding needed.

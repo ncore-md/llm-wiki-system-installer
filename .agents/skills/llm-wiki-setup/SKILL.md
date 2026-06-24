@@ -51,7 +51,7 @@ config["vaults"]["NewVault"] = {
 }
 
 # Example: modify a vault's raw paths
-config["vaults"]["Core"]["raw_paths"] = ["/new/path/to/Raw/Sources"]
+config["vaults"]["<primary-vault-name>"]["raw_paths"] = ["/new/path/to/Raw/Sources"]
 
 with open(config_path, "w") as f:
     json.dump(config, f, indent=2)
@@ -68,8 +68,8 @@ PYEOF
    Present the list to the user:
    ```
    Available Obsidian vaults:
-     1. Core       — /path/to/Core/.llm-wiki/Core
-     2. NLite      — /path/to/NLite
+     1. <vault-1-name>   — /path/to/vault1/.llm-wiki
+     2. <vault-2-name>   — /path/to/vault2
      ...
 
    Which vaults do you want this project to access? (Type numbers separated by spaces, or 'all' for all.)
@@ -85,10 +85,10 @@ PYEOF
 
    Ask the user for each vault:
    ```
-   Vault: Core
+   Vault: <vault-1-name>
      Role? (primary / read-only) → primary
 
-   Vault: NLite  
+   Vault: <vault-2-name>  
      Role? (primary / read-only) → read-only
    ```
 
@@ -96,10 +96,10 @@ PYEOF
 
    Ask the user for each writable vault:
    ```
-   Vault: Core (primary)
+   Vault: <vault-name> (primary)
      Raw source directories? (Enter paths, one per line. Empty = no raw sources.)
      > Raw/Sources
-     > /Users/bernardoresende/Core/.llm-wiki/Core/Raw/Files
+     > <wiki-path>/Raw/Files
      > (empty to stop)
    ```
 
@@ -110,7 +110,7 @@ PYEOF
    python3 << 'PYEOF'
 import os, json
 
-wiki_root = "/Users/bernardoresende/Core/.llm-wiki/Core"
+wiki_root = "<wiki-root>"
 user_inputs = ["Raw/Sources", "Raw/Files"]  # from user input
 raw_paths = [os.path.abspath(p) if not os.path.isabs(p) else p for p in user_inputs]
 
@@ -119,10 +119,10 @@ for rp in raw_paths:
     print(f"  {rp}")
 
 # Store in config
-config_path = "/Users/bernardoresende/Core/.llm-wiki-config/config.json"
+config_path = "<project-root>/.llm-wiki-config/config.json"
 with open(config_path) as f:
     config = json.load(f)
-config["vaults"]["Core"]["raw_paths"] = raw_paths
+config["vaults"]["<primary-vault-name>"]["raw_paths"] = raw_paths
 with open(config_path, "w") as f:
     json.dump(config, f, indent=2)
 print("Config updated with resolved paths.")
@@ -133,7 +133,7 @@ PYEOF
 
 5. **Set vault rules file path:** Ask the user for each vault's rules file — where note conventions (key point limits, required sections) are defined. Default is `AGENTS.md` at the vault root.
    ```
-   Vault: Core
+   Vault: <vault-name>
      Rules file? (relative path from wiki root, default AGENTS.md)
      > AGENTS.md
    ```
@@ -148,13 +148,13 @@ PYEOF
 
    b. **Text model** (for note generation):
       ```bash
-      python3 scripts/wiki_shared.py set-default text_model_id "model-id" 2>&1
+      python3 scripts/wiki_shared.py set-default text_model_id "<model-id>" 2>&1
       ```
 
    c. **VL model** (for image analysis — optional):
       Ask the user for VL settings:
-        - Provider: e.g., `omlx`, `openai`
-        - Model ID: e.g., `qwen3.6-35b-a3b-mlx-vl-oQ4-FP16`
+        - Provider: e.g., `<vl-provider>`, `openai`
+        - Model ID: e.g., "<vl-model-id>"
         - Base URL: e.g., `http://localhost:8000/v1`
       Write VL settings to project config (not just cache).
       **Cache note:** This modifies the file in-place — clear `Schema/.llm-wiki-cache.json` or use `--force` on subsequent reads.
@@ -182,20 +182,20 @@ PYEOF
 
    ```json
    {
-     "wiki_path": "/Users/bernardoresende/Core/.llm-wiki",
+     "wiki_path": "<project-root>",
 
      "vaults": {
-       "Core": {
-         "wiki_root": "/Users/bernardoresende/Core/.llm-wiki/Core",
+       "<primary-vault-name>": {
+         "wiki_root": "<primary-wiki-root>",
          "permissions": ["read", "write", "ingest", "maintain"],
-         "raw_paths": ["/Users/bernardoresende/Core/.llm-wiki/Core/Raw/Sources"],
+         "raw_paths": ["<primary-wiki-root>/Raw/Sources"],
          "rules_path": {
            "relative": "AGENTS.md",
-           "absolute": "/Users/bernardoresende/Core/.llm-wiki/Core/AGENTS.md"
+           "absolute": "<primary-wiki-root>/AGENTS.md"
          }
        },
-       "NLite": {
-         "wiki_root": "/path/to/NLite/.llm-wiki/NLite",
+       "<secondary-vault-name>": {
+         "wiki_root": "<secondary-wiki-root>",
          "permissions": ["read"],
          "raw_paths": []
        }
