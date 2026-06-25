@@ -127,6 +127,51 @@ else
     warn "python3 not found. Validation commands won't be available."
 fi
 
+# ─── Obsidian Vault Registration ──────────────────────────────────────
+_register_obsidian_vault() {
+  local vault_path="$1"
+  local obssi_config="$HOME/Library/Application Support/Obsidian/obsidian.json"
+
+  # Create .obsidian/app.json in the vault (Obsidian needs this to recognize the folder)
+  local obsidian_dir="${vault_path}/.obsidian"
+  mkdir -p "$obsidian_dir"
+  if [[ ! -f "$obsidian_dir/app.json" ]]; then
+    printf '{\n  "alwaysUpdateLinks": true,\n  "useMarkdownLinks": false\n}\n' > "$obsidian_dir/app.json"
+  fi
+
+  # Skip if Obsidian config doesn't exist (Obsidian hasn't been opened yet)
+  if [[ ! -f "$obssi_config" ]]; then
+    warn "No Obsidian config found at $obssi_config — vault created but not registered in Obsidian."
+    info "Open Obsidian manually, then go to File → Open folder as vault and select: $vault_path"
+    return 0
+  fi
+
+  # Generate a unique ID for this vault (sha256 of path, first 16 chars)
+  local id
+  id="$(echo "$vault_path" | shasum -a 256 | cut -d' ' -f1 | head -c 16)"
+
+  # Check if already registered
+  local existing_path
+  existing_path="$(jq -r --arg id "$id" '.vaults[$id].path // ""' "$obssi_config" 2>/dev/null)"
+  if [[ -n "$existing_path" ]]; then
+    info "Vault already registered in Obsidian (id=$id)"
+    return 0
+  fi
+
+  # Register the vault in obsidian.json (non-interactive)
+  local _obs_tmp="${obssi_config}.tmp.$$"
+  if jq --arg id "$id" \
+     --arg path "$vault_path" \
+     '.vaults[$id] = {"path": $path}' \
+     "$obssi_config" > "$_obs_tmp" 2>/dev/null && mv "$_obs_tmp" "$obssi_config"; then
+    success "Registered vault in Obsidian (id=$id, path=$vault_path)"
+  else
+    warn "Failed to register vault in Obsidian."
+    info "Open Obsidian manually, then go to File → Open folder as vault and select: $vault_path"
+    rm -f "$_obs_tmp"
+  fi
+}
+
 # ─── Discover Existing Vaults ──────────────────────────────────────────
 echo ""
 info "Discovering existing Obsidian vaults..."
@@ -338,9 +383,11 @@ setup_vault() {
             chmod +x .git/hooks/$hook 2>/dev/null || true
         fi
     done
-    fi
 
     success "Setup complete: $TARGET_DIR"
+
+    # Register vault with Obsidian (so obsidian CLI discovers it)
+    _register_obsidian_vault "$TARGET_DIR"
 }
 
 # ─── Run Setup ────────────────────────────────────────────────────────
@@ -358,89 +405,3 @@ clean_up_installer() {
     done
 }
 clean_up_installer
-
-# ─── Register Vault Path (so skills auto-discover it) ─────────────
-mkdir -p "$HOME/.pi"
-echo "$VAULT_PATH" > "$HOME/.pi/pi-vault-path"
-success "Vault path registered: ~/.pi/pi-vault-path"
-
-# ─── Register with Obsidian (if CLI available and running) ─────────
-register_obsidian_vault() {
-    local VPATH="$1"
-
-    # Create .obsidian folder with basic config if missing (always)
-    mkdir -p "$VPATH/.obsidian"
-    if [ ! -f "$VPATH/.obsidian/app.json" ]; then
-        printf '{\n  "alwaysUpdateLinks": true,\n  "useMarkdownLinks": false\n}\n' > "$VPATH/.obsidian/app.json"
-    fi
-
-    # Find Obsidian config — platform-agnostic (always try to register)
-    local OCFG=""
-    case "$(uname -s)" in
-        Darwin*)  OCFG="$HOME/Library/Application Support/obsidian/obsidian.json" ;;
-        MINGW*|MSYS*) OCFG="$APPDATA/Obsidian/obsidian.json" ;;
-        *)        OCFG="$HOME/.config/Obsidian/obsidian.json" ;;
-    esac
-
-    if [ -f "$OCFG" ]; then
-        local VID=$(python3 -c "import uuid; print(str(uuid.uuid4())[:12])")
-        python3 << PYEOF
-import json, os
-config_path = "$OCFG"
-vault_path = "$VPATH"
-with open(config_path, 'r') as f:
-    config = json.load(f)
-config['vaults']['$VID'] = {'path': vault_path, 'ts': int(os.path.getmtime(vault_path) * 1000)}
-with open(config_path, 'w') as f:
-    json.dump(config, f, indent=2)
-print(f'Registered vault as ID: $VID')
-PYEOF
-        success "Vault registered with Obsidian (restart to see it)."
-    else
-        warn "Could not find Obsidian config at $OCFG. Open the vault in Obsidian to register it manually."
-    fi
-}
-register_obsidian_vault "$VAULT_PATH"
-
-# ─── Register Agent Skills Locally (in vault) ──────────────────────
-register_skills() {
-    local VAULT_SKILLS="$VAULT_PATH/.agents/skills/"
-    if [ -d "$VAULT_SKILLS" ]; then
-        for skill_dir in "$VAULT_SKILLS"*/; do
-            [ -d "$skill_dir" ] || continue
-            local skill_name=$(basename "$skill_dir")
-            success "Skill available in vault: $skill_name"
-        done
-    fi
-}
-register_skills
-
-echo ""
-info "Running post-setup validation..."
-
-cd "$VAULT_PATH" || exit 1
-
-if command -v python3 &> /dev/null; then
-    if [ -f "scripts/wiki_tool.py" ]; then
-        python3 scripts/wiki_tool.py build 2>&1 && success "Build OK" || warn "Build had issues (expected — no Wiki notes yet)"
-        python3 scripts/wiki_tool.py lint 2>&1 && success "Lint OK" || warn "Lint had issues (expected — no Wiki notes yet)"
-    else
-        warn "wiki_tool.py not found. Validation unavailable."
-    fi
-fi
-
-if command -v obsidian &> /dev/null; then
-    if obsidian version &> /dev/null 2>&1; then
-        info "Restart Obsidian to see the new vault in its list."
-    else
-        warn "Obsidian not running. Please open the vault in Obsidian to register it."
-    fi
-fi
-
-echo ""
-success "Setup complete! ${VAULT_PATH}"
-info "Next steps:"
-echo "   1. Open the vault in Obsidian (restart to see new vault)"
-echo "   2. Add your first source to Raw/Sources/"
-echo "   3. Follow the ingest workflow in AGENTS.md"
-info "Agent skills are available in .agents/skills/ — use them to ingest, query, and lint."
