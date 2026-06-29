@@ -3,6 +3,9 @@ name: llm-wiki-ingest
 description: Ingest new sources and create or update compiled Wiki notes following the ingest workflow. Uses Obsidian CLI for all vault file operations to prevent YAML corruption and wikilink errors.
 ---
 
+> **Pi:** Model discovery reads `~/.pi/agent/models.json`. Set `vl_model_id`/`vl_provider` in config or let discovery auto-detect.
+> **Claude:** Model discovery falls back to built-in known VL models if config has no `vl_model_id`. Set defaults via `wiki_shared.py set-default` or write to `config.json`.
+
 ## When triggered
 **Invoking this skill means executing the workflow, not discussing it.** The very first action is vault selection.
 

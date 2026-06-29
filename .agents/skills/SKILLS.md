@@ -83,6 +83,37 @@ This keeps skills as a **shared system** — one source of truth, deployed to wh
 
 ---
 
+## Dual-Agent Usage (Pi + Claude)
+
+The wiki system works with both **Pi agents** and **Claude (Claude Code)** agents. The core tooling, directory structure, and frontmatter rules are identical for both. The only difference is **VL model discovery** for image processing.
+
+| Aspect | Pi | Claude Code |
+|---|---|---|
+| Model discovery | Reads `~/.pi/agent/models.json` | Falls back to built-in VL model list |
+| Config defaults | Writes `vl_model_id` to `.llm-wiki-config/config.json` | Writes `vl_model_id` to `.llm-wiki-config/config.json` |
+| File operations | Uses `obsidian` CLI + `obsidian_write`/`obsidian_append` | Uses `obsidian` CLI + `obsidian_write`/`obsidian_append` |
+| Python tooling | `wiki_tool.py` + `wiki_shared.py` | Same |
+| Git hooks | Pre-commit lint, pre-push security scan | Same |
+
+### How it works
+
+1. **Config-first**: Both agents write model defaults to `.llm-wiki-config/config.json`. This is the source of truth.
+2. **Fallback chain** in `discover_vl_models()`:
+   - Config defaults (both agents) → Pi registry (`~/.pi/agent/models.json`) → Built-in known models (Claude)
+3. **Skills are provider-agnostic**: They reference the resolved model, not a specific agent's config path.
+
+### Setting the VL model
+
+```bash
+# Both agents use the same CLI:
+python3 scripts/wiki_shared.py set-default vl_model_id "gpt-4o"
+python3 scripts/wiki_shared.py set-default vl_provider "openai"
+```
+
+No agent-specific configuration needed.
+
+---
+
 ## Shared Infrastructure (Not Skills)
 
 These are not skills themselves but support all of them:
@@ -116,7 +147,7 @@ Discovered by `_discover_tag_routing()` in priority order:
 
 ## Supporting Tools (External Skills)
 
-Wiki skills depend on these Obsidian and web tools installed in your pi skills directory (typically `~/.pi/skills/`):
+Wiki skills depend on these Obsidian and web tools installed in your skills directory:
 
 | Tool | Purpose |
 |---|---|

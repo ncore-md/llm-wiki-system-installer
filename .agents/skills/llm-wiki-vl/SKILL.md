@@ -3,6 +3,9 @@ name: llm-wiki-vl
 description: Analyze images and produce clean Obsidian wiki notes. Use when a subagent needs vision capabilities to extract structured content from images (screenshots, diagrams, checklists) and convert it into properly formatted wiki notes with YAML frontmatter.
 ---
 
+> **Pi:** Receives `model: "<vl-model-id>"` from config or `discover_vl_models()`. Model discovered from `~/.pi/agent/models.json`.
+> **Claude:** Receives `model` from config defaults or falls back to built-in VL model list. Set defaults via `wiki_shared.py set-default`.
+
 # LLM Wiki — Vision Language Skill
 
 ## Purpose

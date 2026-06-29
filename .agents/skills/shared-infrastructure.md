@@ -42,7 +42,7 @@ These are not skills themselves but support all of them:
 - **`set_task_override(task, field, value)`** — Sets per-task overrides in cache (e.g., `image_ingest.vl_model_id`).
 
 ### VL Discovery
-- **`discover_vl_models(cache_path=None, force=False)`** — Reads `~/.pi/agent/models.json` to find all VL-capable models across registered providers. Checks if pi's current model has native vision (checks `known_current_models` like `qwen3.6-35b-a3b-oQ6`). Returns `{agent_has_vision, provider, model_id, base_url}`. Results cached to avoid repeated discovery.
+- **`discover_vl_models(cache_path=None, force=False)`** — Multi-agent aware: checks `config.json` defaults first (both Pi and Claude write `vl_model_id` here), then `~/.pi/agent/models.json` (Pi), then falls back to built-in known VL models (Claude). Returns `{agent_has_vision, provider, model_id, base_url}`. Results cached to avoid repeated discovery.
 
 ### Cache Management
 - **`get_cache_path(wiki_root=None)`** — Returns `WikiRoot/Schema/.llm-wiki-cache.json`. Auto-detects wiki root from cwd (looks for Schema/ + Wiki/).

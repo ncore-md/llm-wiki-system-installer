@@ -174,7 +174,7 @@ def _get_default_schema():
             "default_vault": None,     # e.g., "Core"
 
             # Agent vision capability
-            "agent_has_vision": False,  # Whether pi's current model has native vision
+            "agent_has_vision": False,  # Whether the agent's current model has native vision
         },
 
         # ── Per-Vault Configurations ────────────────────────────────
@@ -226,8 +226,10 @@ def _write_cache(cache_path, data):
 def discover_vl_models(cache_path=None, force=False):
     """Discover vision-capable models and update the shared cache.
 
-    Reads ~/.pi/agent/models.json to find all VL-capable models across
-    registered providers. Checks if pi's current model has native vision.
+    Multi-agent aware: checks config.json defaults first (both Pi and Claude
+    can write vl_model_id/vl_provider here), then falls back to Pi-specific
+    paths (~/.pi/agent/models.json), then to built-in known VL models
+    (Claude fallback).
 
     Args:
         cache_path: Optional explicit path to the shared cache file.
@@ -241,16 +243,15 @@ def discover_vl_models(cache_path=None, force=False):
 
     cache = load_cache(cache_path)
 
-    # Check if we should skip discovery (cache valid, not forcing)
+    # ── Shortcut: return cached results if valid (not forcing) ──
     if not force:
         defaults = cache.get("defaults", {})
         agent_vision = defaults.get("agent_has_vision")
 
-        # If discovery was already run and results are valid, return them
         if agent_vision is not None:
             vl_disc = cache.get("vl_discovery", {})
 
-            # Case 1: Agent has native vision — no external VL needed
+            # Agent has native vision — no external VL needed
             if agent_vision and not vl_disc.get("provider"):
                 return {
                     "agent_has_vision": True,
@@ -259,10 +260,10 @@ def discover_vl_models(cache_path=None, force=False):
                     "base_url": None,
                 }
 
-            # Case 2: Local VL model was discovered — check validity
+            # VL model was discovered — check validity
             if vl_disc.get("provider") and vl_disc.get("model_id"):
                 base_url = vl_disc.get("base_url", "")
-                if base_url:  # Non-empty baseUrl means cache is valid
+                if base_url:
                     return {
                         "agent_has_vision": False,
                         "provider": vl_disc["provider"],
@@ -270,113 +271,125 @@ def discover_vl_models(cache_path=None, force=False):
                         "base_url": base_url,
                     }
 
-    # Need to run discovery — read models.json
+    # ── Priority 1: Check config.json defaults (multi-agent source) ──
+    proj_config = load_project_config()
+    if proj_config and "defaults" in proj_config:
+        defaults = proj_config["defaults"]
+        configured_model = defaults.get("vl_model_id")
+        configured_provider = defaults.get("vl_provider")
+
+        if configured_model:
+            result = {
+                "agent_has_vision": False,
+                "provider": configured_provider,
+                "model_id": configured_model,
+                "base_url": defaults.get("vl_base_url"),
+            }
+            _update_discovery_cache(cache, result)
+            return result
+
+    # ── Priority 2: Read Pi's model registry (~/.pi/agent/models.json) ──
     models_file = os.path.expanduser("~/.pi/agent/models.json")
-    if not os.path.exists(models_file):
-        result = {
-            "agent_has_vision": False,
-            "provider": None,
-            "model_id": None,
-            "base_url": None,
-        }
+    if os.path.exists(models_file):
+        with open(models_file) as f:
+            registry = json.load(f)
 
-        # Update cache even on failure (so we don't retry endlessly)
-        _update_discovery_cache(cache, result)
-        return result
+        # Discover ALL VL-capable models across all registered providers
+        vl_models = []
 
-    with open(models_file) as f:
-        registry = json.load(f)
+        for provider_key, provider_data in registry.get("providers", {}).items():
+            base_url = provider_data.get("baseUrl")
 
-    settings_file = os.path.expanduser("~/.pi/agent/settings.json")
-    default_provider = "omlx"
+            seen_ids = set()
+            for model_entry in provider_data.get("models", []):
+                mid = model_entry.get("id", "")
+                mid_lower = mid.lower()
 
-    if os.path.exists(settings_file):
-        with open(settings_file) as f:
-            settings = json.load(f)
-        default_provider = settings.get("defaultProvider", "omlx")
+                if mid_lower in seen_ids:
+                    continue
 
-    # Discover ALL VL-capable models across all registered providers
-    vl_models = []  # list of {provider, model_id, base_url}
-
-    for provider_key, provider_data in registry.get("providers", {}).items():
-        base_url = provider_data.get("baseUrl")
-
-        # Check main models list for VL models
-        seen_ids = set()
-        for model_entry in provider_data.get("models", []):
-            mid = model_entry.get("id", "")
-            mid_lower = mid.lower()
-
-            if mid_lower in seen_ids:
-                continue
-
-            input_types = list(model_entry.get("input", ["text"]))
-            if "image" in input_types:
-                seen_ids.add(mid_lower)
-                vl_models.append({
-                    "provider": provider_key,
-                    "model_id": mid,
-                    "base_url": base_url,
-                })
-
-        # Check modelOverrides for VL models not in main list
-        for override_key, override_val in provider_data.get("modelOverrides", {}).items():
-            input_types = list(override_val.get("input", ["text"]))
-            if "image" in input_types:
-                mid_lower = override_key.lower()
-                if mid_lower not in seen_ids:
+                input_types = list(model_entry.get("input", ["text"]))
+                if "image" in input_types:
                     seen_ids.add(mid_lower)
                     vl_models.append({
                         "provider": provider_key,
-                        "model_id": override_key,
+                        "model_id": mid,
                         "base_url": base_url,
                     })
 
-    # Check if pi's CURRENT model has vision support
-    current_model_vision = False
-    known_current_models = ["qwen3.6-35b-a3b-oQ6", "qwen3.6-35b-a3b-bf16-mlx"]
+            for override_key, override_val in provider_data.get("modelOverrides", {}).items():
+                input_types = list(override_val.get("input", ["text"]))
+                if "image" in input_types:
+                    mid_lower = override_key.lower()
+                    if mid_lower not in seen_ids:
+                        seen_ids.add(mid_lower)
+                        vl_models.append({
+                            "provider": provider_key,
+                            "model_id": override_key,
+                            "base_url": base_url,
+                        })
 
-    for provider_key, provider_data in registry.get("providers", {}).items():
-        for model_entry in provider_data.get("models", []):
-            mid = model_entry.get("id", "").lower()
-            for known in known_current_models:
-                if mid.replace("-", "") == known.replace("-", "") and "image" in model_entry.get("input", []):
-                    current_model_vision = True
+        # Check if Pi's CURRENT model has vision support
+        current_model_vision = False
+        known_current_models = ["qwen3.6-35b-a3b-oQ6", "qwen3.6-35b-a3b-bf16-mlx"]
 
-    # Build result
-    defaults = cache.get("defaults", {})
-    if current_model_vision:
-        # Case 1: Agent's current model has vision — no external VL needed
-        result = {
-            "agent_has_vision": True,
-            "provider": None,
-            "model_id": None,
-            "base_url": None,
-        }
-    elif vl_models:
-        # Case 2: Local VL model found — prefer omlx, then first available
-        chosen = None
-        for m in vl_models:
-            if m["provider"] == "omlx":
-                chosen = m
-                break
-        if not chosen:
-            chosen = vl_models[0]
+        for provider_key, provider_data in registry.get("providers", {}).items():
+            for model_entry in provider_data.get("models", []):
+                mid = model_entry.get("id", "").lower()
+                for known in known_current_models:
+                    if mid.replace("-", "") == known.replace("-", "") and "image" in model_entry.get("input", []):
+                        current_model_vision = True
 
-        result = {
-            "agent_has_vision": False,
-            "provider": chosen["provider"],
-            "model_id": chosen["model_id"],
-            "base_url": chosen.get("base_url"),
-        }
-    else:
-        # Case 3: Nothing found
-        result = {
-            "agent_has_vision": False,
-            "provider": None,
-            "model_id": None,
-            "base_url": None,
-        }
+        if current_model_vision:
+            result = {
+                "agent_has_vision": True,
+                "provider": None,
+                "model_id": None,
+                "base_url": None,
+            }
+        elif vl_models:
+            chosen = None
+            for m in vl_models:
+                if m["provider"] == "omlx":
+                    chosen = m
+                    break
+            if not chosen:
+                chosen = vl_models[0]
+
+            result = {
+                "agent_has_vision": False,
+                "provider": chosen["provider"],
+                "model_id": chosen["model_id"],
+                "base_url": chosen.get("base_url"),
+            }
+        else:
+            result = {
+                "agent_has_vision": False,
+                "provider": None,
+                "model_id": None,
+                "base_url": None,
+            }
+
+        _update_discovery_cache(cache, result)
+        return result
+
+    # ── Priority 3: Claude fallback — built-in known VL models ──
+    # Common VL models available across platforms. No external registry needed.
+    known_vl_models = [
+        {"provider": "openai", "model_id": "gpt-4o", "base_url": None},
+        {"provider": "openai", "model_id": "gpt-4o-mini", "base_url": None},
+        {"provider": "anthropic", "model_id": "claude-sonnet-4-20250514", "base_url": None},
+        {"provider": "anthropic", "model_id": "claude-opus-4-0", "base_url": None},
+        {"provider": "omlx", "model_id": "qwen3.6-35b-a3b-mlx-vl-oQ4-FP16", "base_url": "http://localhost:8000/v1"},
+        {"provider": "omlx", "model_id": "qwen3-vl-32b-instruct", "base_url": "http://localhost:8000/v1"},
+    ]
+
+    result = {
+        "agent_has_vision": False,
+        "provider": known_vl_models[0]["provider"],
+        "model_id": known_vl_models[0]["model_id"],
+        "base_url": known_vl_models[0]["base_url"],
+    }
 
     _update_discovery_cache(cache, result)
     return result
