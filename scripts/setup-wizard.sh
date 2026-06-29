@@ -368,9 +368,14 @@ setup_vault() {
         [ -f "$s" ] && [[ "$(basename "$s")" != "setup-wizard.sh" ]] && cp "$s" scripts/ 2>/dev/null || true
     done
 
-    # Agent skills (one file per skill subdirectory)
+    # Agent skills (SKILL.md from each subdirectory)
     for d in "$SETUP_SRC"/.agents/skills/*/; do
         [ -d "$d" ] && cp "$d"SKILL.md ".agents/skills/$(basename "$d")/" 2>/dev/null || true
+    done
+
+    # Agent skills reference documentation (root-level .md files)
+    for f in "$SETUP_SRC"/.agents/skills/*.md; do
+        [ -f "$f" ] && cp "$f" ".agents/skills/" 2>/dev/null || true
     done
 
     # Pre-commit hook

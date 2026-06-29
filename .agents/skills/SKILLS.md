@@ -116,7 +116,7 @@ Discovered by `_discover_tag_routing()` in priority order:
 
 ## Supporting Tools (External Skills)
 
-Wiki skills depend on these Obsidian and web tools installed at `/Users/bernardoresende/.pi/skills/`:
+Wiki skills depend on these Obsidian and web tools installed in your pi skills directory (typically `~/.pi/skills/`):
 
 | Tool | Purpose |
 |---|---|
