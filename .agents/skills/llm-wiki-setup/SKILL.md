@@ -67,123 +67,29 @@ print("Config updated.")
 PYEOF
    ```
 
-2. **Discover available Obsidian vaults:**
+2. **Discover vaults and auto-select:**
    ```bash
    obsidian vaults --verbose 2>&1 | head -30
    ```
 
-   Present the list to the user:
-   ```
-   Available Obsidian vaults:
-     1. <vault-1-name>   — /path/to/vault1/.llm-wiki
-     2. <vault-2-name>   — /path/to/vault2
-     ...
+   **Auto-selection:** If there's exactly 1 vault → select it as primary. If multiple → select all, first as primary, rest as read-only.
 
-   Which vaults do you want this project to access? (Type numbers separated by spaces, or 'all' for all.)
-   ```
+   Present the auto-selection and ask for confirmation. User can reject to manually choose.
 
-3. **Select vaults and assign permissions:** For each selected vault, determine its role:
-
-   | Vault Role | Permissions | Notes |
-   |---|---|---|
-   | **Primary wiki** (main knowledge base) | `read, write, ingest, maintain` | The vault you'll actively create/update notes in |
-   | **Read-only reference** | `read` | Used for lookups only (e.g., competitor analysis) |
-   | **Disabled** | — | Skip entirely |
-
-   Ask the user for each vault:
-   ```
-   Vault: <vault-1-name>
-     Role? (primary / read-only) → primary
-
-   Vault: <vault-2-name>  
-     Role? (primary / read-only) → read-only
-   ```
-
-4. **Configure raw source paths:** For each writable vault (those with `write` or `ingest` permission), ask the user to specify its raw source directories. Raw paths are **flat** — no auto-discovery, no convention assumptions.
-
-   Ask the user for each writable vault:
-   ```
-   Vault: <vault-name> (primary)
-     Raw source directories? (Enter paths, one per line. Empty = no raw sources.)
-     > Raw/Sources
-     > <wiki-path>/Raw/Files
-     > (empty to stop)
-   ```
-
-   Resolve relative paths against the wiki root using `os.path.abspath()`. For read-only vaults (`read` only), skip raw paths — set `raw_paths: []`. These are stored in config as absolute paths.
-
-   Example path resolution:
+3. **Auto-detect raw source paths:** For each writable vault, scan for `Raw/Sources/`:
    ```bash
-   python3 << 'PYEOF'
-import os, json
-
-wiki_root = "<wiki-root>"
-user_inputs = ["Raw/Sources", "Raw/Files"]  # from user input
-raw_paths = [os.path.abspath(p) if not os.path.isabs(p) else p for p in user_inputs]
-
-print("Resolved paths:")
-for rp in raw_paths:
-    print(f"  {rp}")
-
-# Store in config
-config_path = "<project-root>/.llm-wiki-config/config.json"
-with open(config_path) as f:
-    config = json.load(f)
-config["vaults"]["<primary-vault-name>"]["raw_paths"] = raw_paths
-with open(config_path, "w") as f:
-    json.dump(config, f, indent=2)
-print("Config updated with resolved paths.")
-PYEOF
+   ls <wiki-root>/Raw/Sources && echo "found"
    ```
+   If found → use it. If not → ask user (with `Raw/Sources` as default).
 
-   **⚠️ Limitation:** `get_raw_sources()` in wiki_tool.py only scans the first configured raw path using flat `os.listdir()` (no recursion into subdirectories, no multi-dir support). Only configure one raw path per vault unless you're certain the wiki tool will be updated to handle multiple.
+4. **Auto-detect models:** Check existing config defaults, then `wiki_shared.py discover` for VL models, then `~/.pi/agent/models.json` for text models. Only ask the user if discovery finds nothing.
 
-5. **Set vault rules file path:** Ask the user for each vault's rules file — where note conventions (key point limits, required sections) are defined. Default is `AGENTS.md` at the vault root.
-   ```
-   Vault: <vault-name>
-     Rules file? (relative path from wiki root, default AGENTS.md)
-     > AGENTS.md
-   ```
-   Store as: `rules_path: { relative: "AGENTS.md", absolute: "$WIKI_ROOT/AGENTS.md" }`
-   Accept custom paths (e.g., `VaultRules.md`) or press Enter for default.
+5. **Rules file:** Default is `AGENTS.md` at vault root. Only ask if user wants a custom path.
 
-6. **Set defaults:** Ask about default settings:
-
-   a. **Default ingest vault** (where new content goes by default):
-      - If only one vault is selected → use it automatically, no prompt needed.
-      - If multiple vaults → ask the user: `Which vault should be the default for ingest operations? (Type name or number)`
-
-   b. **Text model** (for note generation):
-      ```bash
-      python3 scripts/wiki_shared.py set-default text_model_id "<model-id>" 2>&1
-      ```
-
-   c. **VL model** (for image analysis — optional):
-      Ask the user for VL settings:
-        - Provider: e.g., `<vl-provider>`, `openai`
-        - Model ID: e.g., "<vl-model-id>"
-        - Base URL: e.g., `http://localhost:8000/v1`
-      Write VL settings to project config (not just cache).
-      **Cache note:** This modifies the file in-place — clear `Schema/.llm-wiki-cache.json` or use `--force` on subsequent reads.
-      ```bash
-      python3 << 'PYEOF'
-import json, os
-
-config_path = "<project-root>/.llm-wiki-config/config.json"
-with open(config_path) as f:
-    config = json.load(f)
-
-defaults = config.setdefault("defaults", {})
-defaults["vl_provider"] = "<provider>"
-defaults["vl_model_id"] = "<model-id>"
-defaults["vl_base_url"] = "<base-url>"
-
-with open(config_path, "w") as f:
-    json.dump(config, f, indent=2)
-
-print("VL settings written to project config.")
-PYEOF
-      ```
+6. **Set defaults:**
+   - Ingest vault: auto-select first/only vault if single choice
+   - Text model: from config defaults or discovery
+   - VL model: from config defaults or `wiki_shared.py discover`
 
 7. **Write config file:** Create `.llm-wiki-config/config.json` at the project root (walk up from wiki root):
 
