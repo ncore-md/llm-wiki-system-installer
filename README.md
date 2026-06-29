@@ -76,6 +76,32 @@ cd llm-wiki-system-installer && bash scripts/setup-wizard.sh
 
 The wizard creates your vault structure, copies skills and tooling into the vault, installs git hooks (pre-commit + pre-push), registers the vault path, and validates with an initial build.
 
+#### Git Lifecycle (After Setup)
+
+The setup wizard **automatically runs `git init`** if the vault doesn't already have a `.git` directory. After setup, you only need to configure your remote:
+
+```bash
+cd <your-vault-path>
+git remote add origin https://github.com/<user>/<repo>.git
+git add -A && git commit -m "Initial LLM Wiki setup"
+git push -u origin main
+```
+
+**What happens automatically:**
+| Step | How |
+|------|-----|
+| `git init` | Auto-run by setup wizard (if no `.git` exists) |
+| `pre-commit` hook | Installs `build + lint + source-lint` on every commit |
+| `pre-push` hook | Installs security scan + compliance audit on every push |
+| Obsidian registration | Vault registered in Obsidian's `obsidian.json` |
+
+**What you do manually:**
+| Step | Command |
+|------|---------|
+| Set remote | `git remote add origin <url>` |
+| First push | `git push -u origin main` |
+| Mark private repo | `touch .private-repo` (skips public scans) |
+
 ### One-Liner for Humans & Agents
 
 | Mode | Command / Env Vars |

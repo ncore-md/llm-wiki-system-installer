@@ -115,7 +115,9 @@ When the user adds a new source:
    python3 scripts/wiki_tool.py log --title "..." --details "..."
    ```
 
-9. **Commit.**
+9. **Commit.** The pre-commit hook runs `build + lint + source-lint` automatically. If any check fails, fix the issues before committing.
+
+> **Note:** The setup wizard auto-runs `git init` on first setup. If this is a new repo, configure your remote first: `git remote add origin <url>` then `git push -u origin main`. For private repos, `touch .private-repo` to skip public security scans on push.
 
 ## Query Workflow
 
