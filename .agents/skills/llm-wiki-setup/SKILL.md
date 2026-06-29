@@ -18,15 +18,22 @@ The first time a wiki skill runs in a project, or when `.llm-wiki-config/config.
 - **Run from wiki root or project directory** — the skill walks up to find `.llm-wiki/` and `Wiki/ + Schema/`
 
 ## Workflow
-1. **Check for existing project config:**
+1. **Check for existing project config (LOCAL ONLY):**
    ```bash
-   cd <wiki-root> && python3 scripts/wiki_shared.py find-project-config 2>&1
+   cd <project-root> && test -f .llm-wiki-config/config.json && echo "exists" || echo "missing"
    ```
-   Output will be the path to `.llm-wiki-config/` or `not found`.
+   This checks the project directory for a local `.llm-wiki-config/config.json`.
 
-   **If `.llm-wiki-config/config.json` does NOT exist:** proceed to step 2 (full setup flow).
+   **If `.llm-wiki-config/config.json` exists in this project:** read and display it to the user. Ask: "Config already exists at <path>. What would you like to do?"
+   - **Add vaults:** discover Obsidian vaults and add new ones (go to step 2, then modify existing config — see "Updating Existing Config" below)
+   - **Edit permissions:** change a vault's role (go to step 3, then rewrite config)
+   - **Change raw_paths:** modify or add source directories (go to step 4, then rewrite config)
+   - **Update defaults:** change ingest vault, text/VL model settings (go to step 5)
+   - **Done/Exit:** no changes needed, exit
 
-   If `.llm-wiki-config/config.json` exists, read and display it to the user. Ask: "Config already exists at <path>. What would you like to do?"
+   **If `.llm-wiki-config/config.json` does NOT exist in this project:** proceed to step 2 (full setup flow to create one). Do NOT search upward for ancestor project configs — each project has its own isolated config.
+
+   **Updating existing config (partial edits):** When modifying an existing file rather than recreating it, read the current JSON with Python, modify in-memory, then write back. **Important:** `wiki_shared.py config` caches discovery results — after modifying the file, either clear the cache (`rm Schema/.llm-wiki-cache.json`) or always use `--force` flag to force re-reading the config file.
    - **Add vaults:** discover Obsidian vaults and add new ones (go to step 2, then modify existing config — see "Updating Existing Config" below)
    - **Edit permissions:** change a vault's role (go to step 3, then rewrite config)
    - **Change raw_paths:** modify or add source directories (go to step 4, then rewrite config)
