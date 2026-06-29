@@ -248,8 +248,10 @@ if [[ "$MODE" == "1" ]]; then
     VAULT_PATH="${VAULT_PATH:-}"
     if [ -z "$VAULT_PATH" ]; then
         SETUP_PARENT="$(cd "$SETUP_SRC" && pwd)"
+        # Project root is parent of llm-wiki-system-installer/ directory
+        PROJECT_ROOT="$(dirname "$SETUP_PARENT")"
         # Vault lives at project_root/.llm-wiki/<vault_name>
-        VAULT_PATH="$SETUP_PARENT/.llm-wiki/$VAULT_NAME"
+        VAULT_PATH="$PROJECT_ROOT/.llm-wiki/$VAULT_NAME"
     fi
 
     # Resolve path for display (remove .. segments, normalize)
