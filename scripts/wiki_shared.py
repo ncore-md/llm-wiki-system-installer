@@ -427,9 +427,14 @@ _PROJECT_CONFIG_FILE = "config.json"
 
 
 def find_project_config(wiki_root=None):
-    """Find the project config directory by walking up from wiki root.
+    """Find the project config directory.
 
-    Searches for .llm-wiki-config/ starting at the wiki root, then each parent.
+    Searches in two places (first match wins):
+      1. Current working directory's parents — handles project directory usage
+      2. Wiki root's parents — handles wiki directory usage
+
+    This allows independent vaults: running tools from a project directory
+    finds that project's config, even when the vault lives elsewhere.
 
     Args:
         wiki_root: Path to the wiki root. Auto-detected if None.
@@ -437,6 +442,14 @@ def find_project_config(wiki_root=None):
     Returns:
         Path to .llm-wiki-config/ or None if not found.
     """
+    # 1. Search from current working directory (covers project dirs)
+    cwd_parents = list(Path.cwd().parents)[:5]
+    for parent in [Path.cwd()] + cwd_parents:
+        config_dir = parent / _PROJECT_CONFIG_DIR
+        if config_dir.is_dir():
+            return config_dir
+
+    # 2. Search from wiki root (covers wiki-local configs)
     if wiki_root is None:
         wiki_root = _detect_wiki_root()
 

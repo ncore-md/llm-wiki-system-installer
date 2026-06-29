@@ -15,7 +15,7 @@ The first time a wiki skill runs in a project, or when `.llm-wiki-config/config.
 
 ## Prerequisites
 - **Obsidian must be running** — the setup uses `obsidian vaults --verbose` to discover available vaults
-- **Run from wiki root or project directory** — the skill walks up to find `.llm-wiki/` and `Wiki/ + Schema/`
+- **Run from project directory** — the skill creates a project-local config at `<project>/.llm-wiki-config/config.json`. With independent vaults, the vault lives elsewhere (e.g. `~/.llm-wiki-vaults/`), and the project config declares vault access.
 
 ## Workflow
 1. **Check for existing project config (LOCAL ONLY):**
