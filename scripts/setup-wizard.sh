@@ -244,11 +244,12 @@ if [[ "$MODE" == "1" ]]; then
         exit 1
     fi
 
-    # Resolve vault path — vaults are independent entities, not inside any project
+    # Resolve vault path — default is project-local .llm-wiki/<vault_name>
     VAULT_PATH="${VAULT_PATH:-}"
     if [ -z "$VAULT_PATH" ]; then
-        # Vault lives in a shared directory, separate from any project
-        VAULT_PATH="$HOME/.llm-wiki-vaults/$VAULT_NAME"
+        SETUP_PARENT="$(cd "$SETUP_SRC" && pwd)"
+        # Vault lives at project_root/.llm-wiki/<vault_name>
+        VAULT_PATH="$SETUP_PARENT/.llm-wiki/$VAULT_NAME"
     fi
 
     # Resolve path for display (remove .. segments, normalize)
